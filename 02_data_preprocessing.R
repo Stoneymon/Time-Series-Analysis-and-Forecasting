@@ -52,10 +52,10 @@ IQR(data_battery$LEM.Overview.Wirkleistung_P)
 length(boxplot.stats(data_battery$LEM.Overview.Wirkleistung_P)$out)
 # 160'000 outliers in this column ? <- Need help of professor how to proceed
 
-out <- boxplot.stats(data_battery$LEM.Overview.Wirkleistung_P)$out
-out_index <- which(data_battery$LEM.Overview.Wirkleistung_P %in% c(out))
-out_index
 
+max(data_wallboxes$LEM.KEBA_P30_1.Wirkleistung_P)
+min(data_wallboxes$LEM.KEBA_P30_1.Wirkleistung_P)
+mean(data_wallboxes$LEM.KEBA_P30_1.Wirkleistung_P)
 
 
 # 1.4 Check for consistency in rows and columns
