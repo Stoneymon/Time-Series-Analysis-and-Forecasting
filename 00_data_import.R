@@ -32,6 +32,8 @@ dim(data_wallboxes)
 str(data_wallboxes)
 summary(data_wallboxes)
 
+colnames(data_wallboxes)
+
 # CHECK IF DATES ARE CONSECUTIVE ----
 unique_dates_db <- data.table(as.Date(data_battery$V1[!duplicated(as.Date(data_battery$V1))]))
 unique_dates_db$consecutive <- c(NA,diff(as.Date(unique_dates_db$V1))==1)

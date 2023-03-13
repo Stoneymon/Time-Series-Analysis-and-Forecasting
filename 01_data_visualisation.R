@@ -23,3 +23,8 @@ p4 <- data_battery_jan %>% ggplot(aes(x=V1, y=LEM.Overview.Battery_SOC)) +
   ylab("SOC") + theme_ipsum()
 p4 <- ggplotly(p4)
 p4
+
+
+
+
+
