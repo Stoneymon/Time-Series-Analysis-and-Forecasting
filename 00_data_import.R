@@ -9,6 +9,8 @@ library(caret)
 library(ggplot2)
 library(hrbrthemes)
 library(writexl)
+library(dplyr)
+
 
 # IMPORT DATA ----
 data_battery <- fread("./data/raw/data_battery_2022-01-01_2023-02-21.csv")

@@ -71,5 +71,14 @@ wallboxes_jan_aug$total.P <- rowSums(wallboxes_jan_aug[, c(2:9)])
 wallboxes_jan_aug <- wallboxes_jan_aug %>% group_by(Date) %>% 
   summarize(total_power = sum(total.P))
 
-# 1.5 save as csv ---
-write_xlsx(wallboxes_jan_aug, path="./data/preprocessed/wallboxes.xlsx")
+SOC <- data_battery_1 %>% mutate(V1=as.Date(V1))
+SOC <- subset(SOC, select=c("V1", "LEM.Overview.Battery_SOC"))
+SOC <- SOC %>% group_by(V1) %>% summarize(total_SOC = sum(LEM.Overview.Battery_SOC))
+
+# 1.5 save as csv ----
+write_xlsx(data_battery_1, path="./data/preprocessed/battery_jan-aug.xlsx")
+write_xlsx(data_grid_1, path="./data/preprocessed/grid_jan-aug.xlsx")
+write_xlsx(data_photovoltaic_1, path="./data/preprocessed/photovoltaic_jan-aug.xlsx")
+write_xlsx(data_wallboxes_1, path="./data/preprocessed/wallboxes_jan-aug.xlsx")
+write_xlsx(wallboxes_jan_aug, path="./data/preprocessed/total_power_jan-aug.xlsx")
+write_xlsx(SOC, path="./data/preprocessed/SOC_jan-aug.xlsx")
