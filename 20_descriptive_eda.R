@@ -26,4 +26,3 @@ p <- wallboxes_jan_aug %>% ggplot(aes(x=Date, y=total_power)) +
   geom_line(aes(y=SOC$total_SOC), color="red")+ theme_ipsum()
 p <- ggplotly(p)
 p
-
