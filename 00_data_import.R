@@ -6,11 +6,18 @@ if (rstudioapi::isAvailable()) {
 library(data.table)
 library(plotly)
 library(caret)
+<<<<<<< Updated upstream
+=======
+library(ggplot2)
+library(hrbrthemes)
+library(writexl)
+>>>>>>> Stashed changes
 
 # IMPORT DATA ----
 data_battery <- fread("./data/raw/data_battery_2022-01-01_2023-02-21.csv")
 data_grid <- fread("./data/raw/data_grid_2022-01-01_2023-02-21.csv")
 data_photovoltaic <- fread("./data/raw/data_photovoltaic_2022-01-01_2023-02-21.csv")
+<<<<<<< Updated upstream
 data_wallboxes <- fread("./data/raw/data_wallboxes_2022-01-01_2023-02-21.csv")
 
 # EXPLORING THE DATASET (EDA) ----
@@ -95,3 +102,6 @@ plot(data_battery_1$V1, data_battery_1$LEM.Overview.Wirkleistung_P)
 plot(data_battery_1$V1, data_battery_1$LEM.Overview.Energy_Charged)
 plot(data_battery_1$V1, data_battery_1$LEM.Overview.Energy_Discharged)
 plot(data_battery_1$V1, data_battery_1$LEM.Overview.Battery_SOC)
+=======
+data_wallboxes <- fread("./data/raw/data_wallboxes_2022-01-01_2023-02-21.csv")
+>>>>>>> Stashed changes
