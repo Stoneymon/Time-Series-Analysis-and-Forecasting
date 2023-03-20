@@ -76,6 +76,8 @@ SOC <- subset(SOC, select=c("V1", "LEM.Overview.Battery_SOC"))
 SOC <- SOC %>% group_by(V1) %>% summarize(total_SOC = sum(LEM.Overview.Battery_SOC))
 
 # 1.5 save as csv ----
+dir.create("./data/preprocessed", showWarnings = FALSE)
+
 write_xlsx(data_battery_1, path="./data/preprocessed/battery_jan-aug.xlsx")
 write_xlsx(data_grid_1, path="./data/preprocessed/grid_jan-aug.xlsx")
 write_xlsx(data_photovoltaic_1, path="./data/preprocessed/photovoltaic_jan-aug.xlsx")
