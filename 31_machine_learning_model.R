@@ -1,5 +1,5 @@
 # PREPARATION ----
-# Convert to data.table
+# Here we only use the data from "wallboxes_jan_aug". Convert it to data.table
 wallboxes_jan_aug
 wallboxes_jan_aug_DT <- setDT(wallboxes_jan_aug)
 
@@ -12,7 +12,9 @@ wallboxes_jan_aug_DT[, total_power_previous_day := shift(total_power, 1)]
 # total_power used on the same day last week
 wallboxes_jan_aug_DT[, total_power_same_day_previous_week := shift(total_power, 7)]
 
-# total power used last 7 days
+# total power used last 7 days (rolling average)
+# install.packages("zoo")
+library(zoo)
 wallboxes_jan_aug_DT <- wallboxes_jan_aug_DT %>%
                           mutate(total_power_last_seven_days = rollmean(total_power, k=7, fill=NA, align='right'))
                       #  ,total_power_last_six_days = rollmean(total_power, k=4, fill=NA, align='right'))
@@ -26,7 +28,8 @@ View(wallboxes_jan_aug_DT)
 str(wallboxes_jan_aug_DT)
 
 ## DT without Date and Week ----
-wallboxes_jan_aug_DT[, Date := NULL]
+# data <- wallboxes_jan_aug_DT[]
+# wallboxes_jan_aug_DT[, Date := NULL]
 data <- wallboxes_jan_aug_DT
 
 ## Check importance of regressors ----
@@ -55,7 +58,7 @@ library(ranger)
 training[,random:=runif(nrow(training), 1, 100)]
 fit.ranger <- ranger(total_power ~ ., data = training, importance = "permutation")
 
-View(fit.ranger)
+# View(fit.ranger)
 imp <- importance(fit.ranger)
 imp <- data.table(Feature = names(imp), importance = imp)
 
