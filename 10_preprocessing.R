@@ -71,6 +71,21 @@ wallboxes_jan_aug$total.P <- rowSums(wallboxes_jan_aug[, c(2:9)])
 wallboxes_jan_aug <- wallboxes_jan_aug %>% group_by(Date) %>% 
   summarize(total_power = sum(total.P))
 
+wallboxes_oct_2022_feb_2023 <- data.table(Date=data_wallboxes_2$V1,
+                                          KEBA_1=data_wallboxes_2$LEM.KEBA_P30_1.Wirkleistung_P,
+                                          KEBA_2=data_wallboxes_2$LEM.KEBA_P30_2.Wirkleistung_P,
+                                          KEBA_3=data_wallboxes_2$LEM.KEBA_P30_3.Wirkleistung_P,
+                                          Ladebox1=data_wallboxes_2$LEM.Ladebox1.P,
+                                          Ladebox2=data_wallboxes_2$LEM.Ladebox2.P,
+                                          Ladebox3=data_wallboxes_2$LEM.Ladebox3.P,
+                                          Delta_Wallbox=data_wallboxes_2$LEM.Delta_Wallbox.Wirkleistung_P,
+                                          Raption_50=data_wallboxes_2$LEM.Raption_50.Wirkleistung_P)
+
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% mutate(Date=as.Date(Date))
+wallboxes_oct_2022_feb_2023$total.P <- rowSums(wallboxes_oct_2022_feb_2023[, c(2:9)])
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% group_by(Date) %>% 
+  summarize(total_power = sum(total.P))
+
 SOC <- data_battery_1 %>% mutate(V1=as.Date(V1))
 SOC <- subset(SOC, select=c("V1", "LEM.Overview.Battery_SOC"))
 SOC <- SOC %>% group_by(V1) %>% summarize(total_SOC = sum(LEM.Overview.Battery_SOC))
