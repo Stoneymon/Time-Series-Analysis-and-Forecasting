@@ -71,6 +71,14 @@ str(wallboxes_oct_2022_feb_2023_DT)
 summary(wallboxes_oct_2022_feb_2023_DT)
 
 
+## Remove date ----
+jan_aug <- wallboxes_jan_aug_DT$Date
+oct_feb <- wallboxes_oct_2022_feb_2023_DT$Date
+
+wallboxes_jan_aug_DT[, Date := NULL]
+wallboxes_oct_2022_feb_2023_DT[, Date := NULL]
+
+
 # SPLITTING ----
 # wallboxes_jan_aug_DT[, Date := NULL]
 set.seed(123) # used to make results reproducible
@@ -80,10 +88,12 @@ idx <- createDataPartition(y = data[, total_power], p = 0.8, list = F, times = 1
 training <- data[idx]
 training_x <- data[idx, !"total_power"]
 training_y <- data[idx, total_power]
+training_jan_aug <- jan_aug[idx]
 
 test <- data[!idx]
 test_x <- data[!idx, !"total_power"]
 test_y <- data[!idx, total_power]
+test_jan_aug <- jan_aug[-idx]
 
 
 ## Feature importance ----
@@ -118,12 +128,12 @@ summary(lin_regr)
 training_predictions <- lin_regr$fitted.values
 test_predictions <- predict(lin_regr, test)
 
-plot_ly(training, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~training_predictions, name = 'predictions', mode = 'lines+markers') 
 
 # -> When looking at the plot we see that the model is not capable of producing a got result on the training data.
 
-plot_ly(test, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~test_predictions, name = 'predictions', mode = 'lines+markers') 
 
 # -> So not really surprisingly also the performance on the test data is far from good.
@@ -195,7 +205,7 @@ for (x in 1:6) {
 
 }
 
-# -> Looking at the actual numbers we see the model already starts to over fit at a degree of 2
+# -> Looking at the actual numbers we see the model already starts to over fit at a degree of 2 (MAE in Test Results)
 
 
 # Decision Tree ----
@@ -203,11 +213,11 @@ library(rpart) # Decision trees
 library(rpart.plot)  # plots for decision trees
 
 fit <- rpart::rpart(total_power ~ ., data = training)
-# print(fit)
-# printcp(fit)  # cp: complexity parameter
-# plotcp(fit)
-# summary(fit)
-# rpart.plot(fit, type = 2, extra = 101, fallen.leaves = F, main = "Initial Regression Tree", tweak = 1.2)
+print(fit)
+printcp(fit)  # cp: complexity parameter
+plotcp(fit)
+summary(fit)
+rpart.plot(fit, type = 2, extra = 101, fallen.leaves = F, main = "Initial Regression Tree", tweak = 1.2)
 
 fit.entire <- rpart::rpart(total_power ~ ., data = training, control = rpart.control(minsplit = 1, cp = 0))
 # print(fit.entire)
@@ -231,26 +241,26 @@ my_pred_initial_tree_TRAINING <- predict(fit, newdata = training_x)
 my_pred_entire_tree_TRAINING <- predict(fit.entire, newdata = training_x)
 my_pred_pruned_tree_TRAINING <- predict(fit.entire.pruned, newdata = training_x)
 
-plot_ly(training, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~my_pred_initial_tree_TRAINING, name = 'predictions_initial_tree', mode = 'lines+markers') 
 
-plot_ly(training, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~my_pred_entire_tree_TRAINING, name = 'predictions_entire_tree', mode = 'lines+markers') 
 
-plot_ly(training, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~my_pred_pruned_tree_TRAINING, name = 'predictions_pruned_tree', mode = 'lines+markers') 
 
 my_pred_initial_tree_TEST <- predict(fit, newdata = test_x)
 my_pred_entire_tree_TEST <- predict(fit.entire, newdata = test_x)
 my_pred_pruned_tree_TEST <- predict(fit.entire.pruned, newdata = test_x)
 
-plot_ly(test, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~my_pred_initial_tree_TEST, name = 'predictions_initial_tree', mode = 'lines+markers') 
 
-plot_ly(test, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~my_pred_entire_tree_TEST, name = 'predictions_entire_tree', mode = 'lines+markers') 
 
-plot_ly(test, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~my_pred_pruned_tree_TEST, name = 'predictions_pruned_tree', mode = 'lines+markers') 
 
 
@@ -258,12 +268,12 @@ plot_ly(test, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mo
 fit.ranger <- ranger(total_power ~ ., data = training) # default parameters
 
 # results on training set
-plot_ly(training, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~fit.ranger$predictions, name = 'predictions_rf_training', mode = 'lines+markers') 
 
 # results on test set
 my_pred_rf <- predict(fit.ranger, data = test_x)
-plot_ly(test, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~my_pred_rf$predictions, name = 'predictions_rf_test', mode = 'lines+markers')
 
 
@@ -271,21 +281,22 @@ plot_ly(test, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mo
 # Here I am using the rest of the data we haven't even looked at so far. Let's see how the model performs
 
 wallboxes_oct_2022_feb_2023_predictions <- predict(lin_regr, wallboxes_oct_2022_feb_2023_DT)
-plot_ly(wallboxes_oct_2022_feb_2023_DT, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(wallboxes_oct_2022_feb_2023_DT, x = oct_feb, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~wallboxes_oct_2022_feb_2023_predictions, name = 'predictions', mode = 'lines+markers') 
 
 wallboxes_oct_2022_feb_2023_initial_tree <- predict(fit, newdata = wallboxes_oct_2022_feb_2023_DT)
-plot_ly(wallboxes_oct_2022_feb_2023_DT, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(wallboxes_oct_2022_feb_2023_DT, x = oct_feb, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~wallboxes_oct_2022_feb_2023_initial_tree, name = 'predictions_initial_tree', mode = 'lines+markers') 
 
 wallboxes_oct_2022_feb_2023_entire_tree <- predict(fit.entire, newdata = wallboxes_oct_2022_feb_2023_DT)
-plot_ly(wallboxes_oct_2022_feb_2023_DT, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(wallboxes_oct_2022_feb_2023_DT, x = oct_feb, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~wallboxes_oct_2022_feb_2023_entire_tree, name = 'predictions_entire_tree', mode = 'lines+markers') 
 
 wallboxes_oct_2022_feb_2023_pruned_tree <- predict(fit.entire.pruned, newdata = wallboxes_oct_2022_feb_2023_DT)
-plot_ly(wallboxes_oct_2022_feb_2023_DT, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(wallboxes_oct_2022_feb_2023_DT, x = oct_feb, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~wallboxes_oct_2022_feb_2023_pruned_tree, name = 'predictions_entire_tree', mode = 'lines+markers') 
 
 wallboxes_oct_2022_feb_2023_rf <- predict(fit.ranger, data = wallboxes_oct_2022_feb_2023_DT)
-plot_ly(wallboxes_oct_2022_feb_2023_DT, x = ~Date, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+plot_ly(wallboxes_oct_2022_feb_2023_DT, x = oct_feb, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~wallboxes_oct_2022_feb_2023_rf$predictions, name = 'predictions_rf', mode = 'lines+markers') 
+
