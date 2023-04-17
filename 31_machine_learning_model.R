@@ -1,5 +1,5 @@
 # PREPARATION ----
-# For this part we only use the data from "wallboxes_jan_aug". Convert it to data.table
+# Convert it to data.table
 wallboxes_jan_aug
 wallboxes_jan_aug_DT <- setDT(wallboxes_jan_aug)
 
@@ -10,15 +10,15 @@ wallboxes_oct_2022_feb_2023_DT <- setDT(wallboxes_oct_2022_feb_2023)
 ## Data Enrichment ----
 # add more columns that could be used for predicting the total power needed
 
-# total_power used on previous day
+# 1. total_power used on previous day
 wallboxes_jan_aug_DT[, total_power_previous_day := shift(total_power, 1)]
 wallboxes_oct_2022_feb_2023_DT[, total_power_previous_day := shift(total_power, 1)]
 
-# total_power used on the same day last week
+# 2. total_power used on the same day last week
 wallboxes_jan_aug_DT[, total_power_same_day_previous_week := shift(total_power, 7)]
 wallboxes_oct_2022_feb_2023_DT[, total_power_same_day_previous_week := shift(total_power, 7)]
 
-# average total_power that was used in the last 7 days (rolling average)
+# 3. average total_power that was used in the last 7 days (rolling average)
 # install.packages("zoo")
 library(zoo)
 wallboxes_jan_aug_DT <- wallboxes_jan_aug_DT %>%
@@ -59,7 +59,7 @@ wallboxes_oct_2022_feb_2023_DT[, total_power_last_seven_days := shift(total_powe
 
 
 ## Remove NA values ----
-# remove rows containing NA values
+# remove rows containing NA values -> because we shifted some values
 colSums(is.na(wallboxes_jan_aug_DT))
 wallboxes_jan_aug_DT <- na.omit(wallboxes_jan_aug_DT)
 str(wallboxes_jan_aug_DT)
@@ -72,6 +72,8 @@ summary(wallboxes_oct_2022_feb_2023_DT)
 
 
 ## Remove date ----
+# remove the date column just to be safe so it doesn't interfere with the models
+# but store it so we can use it later for plotting the results
 jan_aug <- wallboxes_jan_aug_DT$Date
 oct_feb <- wallboxes_oct_2022_feb_2023_DT$Date
 
@@ -80,7 +82,6 @@ wallboxes_oct_2022_feb_2023_DT[, Date := NULL]
 
 
 # SPLITTING ----
-# wallboxes_jan_aug_DT[, Date := NULL]
 set.seed(123) # used to make results reproducible
 data <- wallboxes_jan_aug_DT
 idx <- createDataPartition(y = data[, total_power], p = 0.8, list = F, times = 1)
@@ -116,7 +117,7 @@ imp <- data.table(Feature = names(imp), importance = imp)
 plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
   layout(xaxis = list(categoryorder="total descending"))
 
-# -> No feature seems to be less important than the random one we just created
+# -> At least no feature seems to be less important than the random one we just created
 training[, random := NULL]
 
 
@@ -129,13 +130,14 @@ training_predictions <- lin_regr$fitted.values
 test_predictions <- predict(lin_regr, test)
 
 plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~training_predictions, name = 'predictions', mode = 'lines+markers') 
+  add_trace(y = ~training_predictions, name = 'predictions', mode = 'lines+markers') %>%
+  layout(title = 'Linear Regression Training') # plot_bgcolor = "#e5ecf6"
 
 # -> When looking at the plot we see that the model is not capable of producing a got result on the training data.
 
 plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~test_predictions, name = 'predictions', mode = 'lines+markers') 
-
+  add_trace(y = ~test_predictions, name = 'predictions', mode = 'lines+markers')  %>%
+  layout(title = 'Linear Regression Test')
 # -> So not really surprisingly also the performance on the test data is far from good.
 
 
@@ -213,13 +215,13 @@ library(rpart) # Decision trees
 library(rpart.plot)  # plots for decision trees
 
 fit <- rpart::rpart(total_power ~ ., data = training)
-print(fit)
+# print(fit)
 printcp(fit)  # cp: complexity parameter
 plotcp(fit)
-summary(fit)
-rpart.plot(fit, type = 2, extra = 101, fallen.leaves = F, main = "Initial Regression Tree", tweak = 1.2)
+# summary(fit)
+# rpart.plot(fit, type = 2, extra = 101, fallen.leaves = F, main = "Initial Regression Tree", tweak = 1.2)
 
-fit.entire <- rpart::rpart(total_power ~ ., data = training, control = rpart.control(minsplit = 1, cp = 0))
+fit.entire <- rpart::rpart(total_power ~ ., data = training, control = rpart.control(minsplit = 1, minbucket = 1, cp = 0))
 # print(fit.entire)
 # printcp(fit.entire)
 # plotcp(fit.entire)
@@ -242,39 +244,64 @@ my_pred_entire_tree_TRAINING <- predict(fit.entire, newdata = training_x)
 my_pred_pruned_tree_TRAINING <- predict(fit.entire.pruned, newdata = training_x)
 
 plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~my_pred_initial_tree_TRAINING, name = 'predictions_initial_tree', mode = 'lines+markers') 
+  add_trace(y = ~my_pred_initial_tree_TRAINING, name = 'predictions_initial_tree', mode = 'lines+markers') %>%
+  layout(title = 'Initial Decision Tree Training')
 
 plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~my_pred_entire_tree_TRAINING, name = 'predictions_entire_tree', mode = 'lines+markers') 
-
+  add_trace(y = ~my_pred_entire_tree_TRAINING, name = 'predictions_entire_tree', mode = 'lines+markers') %>%
+  layout(title = 'Entire Decision Tree Training')
+  
 plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~my_pred_pruned_tree_TRAINING, name = 'predictions_pruned_tree', mode = 'lines+markers') 
-
+  add_trace(y = ~my_pred_pruned_tree_TRAINING, name = 'predictions_pruned_tree', mode = 'lines+markers') %>%
+  layout(title = 'Pruned Decision Tree Training')
+  
 my_pred_initial_tree_TEST <- predict(fit, newdata = test_x)
 my_pred_entire_tree_TEST <- predict(fit.entire, newdata = test_x)
 my_pred_pruned_tree_TEST <- predict(fit.entire.pruned, newdata = test_x)
 
 plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~my_pred_initial_tree_TEST, name = 'predictions_initial_tree', mode = 'lines+markers') 
-
+  add_trace(y = ~my_pred_initial_tree_TEST, name = 'predictions_initial_tree', mode = 'lines+markers') %>%
+  layout(title = 'Initial Decision Tree Test')
+  
 plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~my_pred_entire_tree_TEST, name = 'predictions_entire_tree', mode = 'lines+markers') 
-
+  add_trace(y = ~my_pred_entire_tree_TEST, name = 'predictions_entire_tree', mode = 'lines+markers') %>%
+  layout(title = 'Entire Decision Tree Test')
+  
 plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~my_pred_pruned_tree_TEST, name = 'predictions_pruned_tree', mode = 'lines+markers') 
-
+  add_trace(y = ~my_pred_pruned_tree_TEST, name = 'predictions_pruned_tree', mode = 'lines+markers') %>%
+  layout(title = 'Pruned Decision Tree Test')
 
 # Random Forest ----
+## Default ----
 fit.ranger <- ranger(total_power ~ ., data = training) # default parameters
 
 # results on training set
 plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~fit.ranger$predictions, name = 'predictions_rf_training', mode = 'lines+markers') 
+  add_trace(y = ~fit.ranger$predictions, name = 'predictions_rf_training', mode = 'lines+markers') %>%
+  layout(title = 'Random Forest Training')
 
 # results on test set
 my_pred_rf <- predict(fit.ranger, data = test_x)
 plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(y = ~my_pred_rf$predictions, name = 'predictions_rf_test', mode = 'lines+markers')
+  add_trace(y = ~my_pred_rf$predictions, name = 'predictions_rf_test', mode = 'lines+markers') %>%
+  layout(title = 'Random Forest Test')
+
+
+## Tuned Version ----
+r.forest <- train(total_power ~ ., 
+                  data = training, 
+                  method = "ranger")
+
+# results on training set
+pred_random_forest_training <- predict(r.forest, newdata = training_x)
+plot_ly(training, x = training_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+  add_trace(y = pred_random_forest_training, name = 'predictions_rf_training', mode = 'lines+markers') %>%
+  layout(title = 'Tuned Random Forest Training')
+
+pred_random_forest_test <- predict(r.forest, newdata = test_x)
+plot_ly(test, x = test_jan_aug, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
+  add_trace(y = pred_random_forest_test, name = 'predictions_rf_training', mode = 'lines+markers') %>%
+  layout(title = 'Tuned Random Forest Test')
 
 
 # Use rest of data ----
