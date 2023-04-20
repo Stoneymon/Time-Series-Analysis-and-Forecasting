@@ -57,6 +57,8 @@ wallboxes_oct_2022_feb_2023_DT[, total_power_last_seven_days := shift(total_powe
 # wallboxes_oct_2022_feb_2023_DT[, total_power_last_three_days := shift(total_power_last_three_days, 1)]
 # wallboxes_oct_2022_feb_2023_DT[, total_power_last_two_days := shift(total_power_last_two_days, 1)]
 
+# 4. Add day of week (Is it weekend or not?)
+
 
 ## Remove NA values ----
 # remove rows containing NA values -> because we shifted some values
