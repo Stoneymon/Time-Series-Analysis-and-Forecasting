@@ -8,3 +8,5 @@
 
 # R Project
 .Rproj.user
+*.xml
+.idea/Time-Series-Analysis-and-Forecasting.iml
