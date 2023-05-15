@@ -63,7 +63,11 @@ autoplot(fc) +ggtitle("Simple Exponential Smoothing Forecast")
 fcholt <- holt(train_set,h=47)
 summary(fcholt)
 
-autoplot(fcholt)
+# Plot the forecast
+plot(fcholt, main = "Holt's Trend Method - Exponential Smoothing Forecasting", xlab = "Year", ylab = "Total Power")
+
+# Add the test_set data as a red line
+lines(test_set, col = "red")
 
 # Check that the residuals look like white noise -> it doesn't
 checkresiduals(fcholt)
@@ -90,8 +94,12 @@ accuracy(fcholt,test_set)
 # Fit the ETS model
 ets_model <- train_set %>% ets()
 
+autoplot(ets_model)
+
 # Forecast the next 47 days
-ets_forecast <- ets_model %>% forecast(h = 1)
+ets_forecast <- ets_model %>% forecast(h = 47)
+
+
 
 # Calculate the accuracy measures
 accuracy(ets_forecast, test_set)
