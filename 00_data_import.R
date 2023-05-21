@@ -6,7 +6,6 @@ if (rstudioapi::isAvailable()) {
 library(data.table)
 library(plotly)
 library(caret)
-library(ggplot2)
 library(hrbrthemes)
 library(writexl)
 library(dplyr)
