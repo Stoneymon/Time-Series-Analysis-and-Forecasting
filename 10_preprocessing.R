@@ -74,7 +74,7 @@ wallboxes_jan_aug <- wallboxes_jan_aug %>%
 
 wallboxes_jan_aug <- wallboxes_jan_aug %>% mutate(Date=as.Date(Date))
 wallboxes_jan_aug <- wallboxes_jan_aug %>% group_by(Date) %>%
-summarize(total_power = mean(total.P))
+summarize(total_power = sum(total_power))
 
 wallboxes_oct_2022_feb_2023 <- data.table(Date=data_wallboxes_2$V1,
                                           KEBA_1=data_wallboxes_2$LEM.KEBA_P30_1.Wirkleistung_P,
