@@ -66,10 +66,15 @@ wallboxes_jan_aug <- data.table(Date=data_wallboxes_1$V1,
                                 Delta_Wallbox=data_wallboxes_1$LEM.Delta_Wallbox.Wirkleistung_P,
                                 Raption_50=data_wallboxes_1$LEM.Raption_50.Wirkleistung_P)
 
-wallboxes_jan_aug <- wallboxes_jan_aug %>% mutate(Date=as.Date(Date))
+wallboxes_jan_aug <- wallboxes_jan_aug %>% mutate(Date=as.POSIXct(Date))
 wallboxes_jan_aug$total.P <- rowSums(wallboxes_jan_aug[, c(2:9)])
-wallboxes_jan_aug <- wallboxes_jan_aug %>% group_by(Date) %>% 
-  summarize(total_power = sum(total.P))
+wallboxes_jan_aug <- wallboxes_jan_aug %>%
+  group_by(Date=floor_date(Date, '1 hour')) %>%
+  summarize(total_power=mean(total.P))
+
+wallboxes_jan_aug <- wallboxes_jan_aug %>% mutate(Date=as.Date(Date))
+wallboxes_jan_aug <- wallboxes_jan_aug %>% group_by(Date) %>%
+summarize(total_power = mean(total.P))
 
 wallboxes_oct_2022_feb_2023 <- data.table(Date=data_wallboxes_2$V1,
                                           KEBA_1=data_wallboxes_2$LEM.KEBA_P30_1.Wirkleistung_P,
@@ -88,7 +93,9 @@ wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% group_by(Date) %>
 
 SOC <- data_battery_1 %>% mutate(V1=as.Date(V1))
 SOC <- subset(SOC, select=c("V1", "LEM.Overview.Battery_SOC"))
-SOC <- SOC %>% group_by(V1) %>% summarize(total_SOC = sum(LEM.Overview.Battery_SOC))
+SOC <- SOC %>% group_by(V1) %>% summarize(battery_soc = mean(LEM.Overview.Battery_SOC)) 
+
+wallboxes_jan_aug$battery_SOC <- SOC$battery_soc
 
 # 1.5 save as csv ----
 dir.create("./data/preprocessed", showWarnings = FALSE)
