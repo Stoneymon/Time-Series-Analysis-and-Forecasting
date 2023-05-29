@@ -37,3 +37,6 @@ grid_pred_dt$SOC <- db$SOC
 wallboxes_hourly <- data.table()
 wallboxes_hourly$Time <- grid_pred_dt$Time
 wallboxes_hourly$wallboxes <- grid_pred_dt$wallboxes
+
+setDT(grid_pred_dt)
+grid_pred_dt[,grid_next_hour:=shift(grid,-1)]
