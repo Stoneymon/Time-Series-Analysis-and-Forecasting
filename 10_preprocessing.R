@@ -86,10 +86,14 @@ wallboxes_oct_2022_feb_2023 <- data.table(Date=data_wallboxes_2$V1,
                                           Delta_Wallbox=data_wallboxes_2$LEM.Delta_Wallbox.Wirkleistung_P,
                                           Raption_50=data_wallboxes_2$LEM.Raption_50.Wirkleistung_P)
 
-wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% mutate(Date=as.Date(Date))
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% mutate(Date=as.POSIXct(Date))
 wallboxes_oct_2022_feb_2023$total.P <- rowSums(wallboxes_oct_2022_feb_2023[, c(2:9)])
-wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% group_by(Date) %>% 
-  summarize(total_power = sum(total.P))
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>%
+  group_by(Date=floor_date(Date, '1 hour')) %>% 
+  summarize(total_power=mean(total.P))
+
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% mutate(Date=as.Date(Date))
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% group_by(Date) %>% summarize(total_power = sum(total_power))
 
 SOC <- data_battery_1 %>% mutate(V1=as.Date(V1))
 SOC <- subset(SOC, select=c("V1", "LEM.Overview.Battery_SOC"))
