@@ -101,7 +101,7 @@ SOC <- SOC %>% group_by(V1) %>% summarize(battery_soc = mean(LEM.Overview.Batter
 
 wallboxes_jan_aug$battery_SOC <- SOC$battery_soc
 
-# 1.5 save as csv ----
+# 1.5 save as xlsx ----
 dir.create("./data/preprocessed", showWarnings = FALSE)
 
 write_xlsx(data_battery_1, path="./data/preprocessed/battery_jan-aug.xlsx")
@@ -110,3 +110,12 @@ write_xlsx(data_photovoltaic_1, path="./data/preprocessed/photovoltaic_jan-aug.x
 write_xlsx(data_wallboxes_1, path="./data/preprocessed/wallboxes_jan-aug.xlsx")
 write_xlsx(wallboxes_jan_aug, path="./data/preprocessed/total_power_jan-aug.xlsx")
 write_xlsx(SOC, path="./data/preprocessed/SOC_jan-aug.xlsx")
+
+# 1.6 save as csv ----
+
+fwrite(data_battery_1, file="./data/preprocessed/battery_jan-aug.csv")
+fwrite(data_grid_1, file="./data/preprocessed/grid_jan-aug.csv")
+fwrite(data_photovoltaic_1, file="./data/preprocessed/photovoltaic_jan-aug.csv")
+fwrite(data_wallboxes_1, file="./data/preprocessed/wallboxes_jan-aug.csv")
+fwrite(wallboxes_jan_aug, file="./data/preprocessed/total_power_jan-aug.csv")
+fwrite(SOC, file="./data/preprocessed/SOC_jan-aug.csv")
