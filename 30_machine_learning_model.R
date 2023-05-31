@@ -1,8 +1,14 @@
+# IMPORT DATA ----
+wallboxes_jan_aug_DT <- fread("./data/preprocessed/total_power_jan-aug.csv")
+
 # PREPARATION ----
 
+# remove unnecessary battery_SOC feature for this
+wallboxes_jan_aug_DT[, battery_SOC := NULL]
+
 # Convert to data.table
-wallboxes_jan_aug
-wallboxes_jan_aug_DT <- setDT(wallboxes_jan_aug)
+# wallboxes_jan_aug
+# wallboxes_jan_aug_DT <- setDT(wallboxes_jan_aug)
 
 # wallboxes_oct_2022_feb_2023
 # wallboxes_oct_2022_feb_2023_DT <- setDT(wallboxes_oct_2022_feb_2023)
@@ -311,6 +317,19 @@ summary(wallboxes_jan_aug_DT)
 
 ## Final Version ----
 
+set.seed(1234)
+
+# check feature importance
+library(ranger)
+wallboxes_jan_aug_DT[, random := runif(nrow(wallboxes_jan_aug_DT), 1, 500)]
+fit.ranger <- ranger(total_power ~ . - Date, data = wallboxes_jan_aug_DT, importance = "permutation")
+imp <- importance(fit.ranger)
+imp <- data.table(Feature = names(imp), importance = imp)
+plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
+  layout(xaxis = list(categoryorder="total descending"))
+wallboxes_jan_aug_DT[, random := NULL]
+
+# predict next day using last 14 days
 actuals <- wallboxes_jan_aug_DT
 start_date <- as.Date("2022-01-08")
 end_date <- as.Date("2022-01-22")
@@ -319,9 +338,9 @@ predictions <- list() # the predictions will get stored in this list
 real_values <- list()
 errors <- list() # the errors will get stored in this list
 i <- 1
-while (end_date <= as.Date("2022-01-31")) {
+while (end_date <= as.Date("2022-08-21")) {
   
-  print(paste('Currently calculating:', end_date))
+  print(paste('Currently calculating prediction for', end_date))
   
   training <- actuals[actuals$Date >= start_date, ]
   training <- actuals[actuals$Date < end_date,] # use 2 weeks to train the model
@@ -344,23 +363,27 @@ while (end_date <= as.Date("2022-01-31")) {
   end_date <- end_date + 1
 }
 
-mean_error <- mean(unlist(errors))  # calculate MAE (Mean Absolute Error)
-mean_error
+mean_absolute_error <- mean(unlist(errors))  # calculate MAE (Mean Absolute Error)
+mean_absolute_error
 
 plot_ly() %>%
   add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines+markers') %>%
   add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines+markers') %>%
   layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
 
+plot_ly() %>%
+  add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines') %>%
+  add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines') %>%
+  layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
 
 # both visualizations do the same
-results <- actuals[actuals$Date >= as.Date("2022-01-22"),]
-results$pred <- unlist(predictions)
-
-result_plot <- plot_ly(results, x = ~Date, y = ~total_power, name="Actuals", type="scatter", mode="line") %>%
-  add_trace(y = ~pred, type="scatter", name="Forecast") %>%
-  layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
-result_plot
+# results <- actuals[actuals$Date >= as.Date("2022-01-22"),]
+# results$pred <- unlist(predictions)
+# 
+# result_plot <- plot_ly(results, x = ~Date, y = ~total_power, name="Actuals", type="scatter", mode="line") %>%
+#   add_trace(y = ~pred, type="scatter", name="Forecast") %>%
+#   layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
+# result_plot
 
 # Use rest of data ----
 # Here I am using the rest of the data we haven't even looked at so far. Let's see how the model performs
