@@ -22,6 +22,7 @@ if (rstudioapi::isAvailable()) {
 library(data.table)
 library(plotly)
 library(zoo)
+library(ranger)
 library(caret)
 
 # Set Seed
@@ -77,7 +78,7 @@ Let's have a look at the data so far.
 ```{r look at data}
 str(wallboxes_jan_aug_DT)
 summary(wallboxes_jan_aug_DT)
-head(wallboxes_jan_aug_DT, n = 15)
+head(wallboxes_jan_aug_DT, n = 10)
 ```
 
 As you can see I now have some NA values because I shifted the data around. Let's remove observations containing NAs in one of their columns.
@@ -87,10 +88,28 @@ As you can see I now have some NA values because I shifted the data around. Let'
 wallboxes_jan_aug_DT <- na.omit(wallboxes_jan_aug_DT)
 # str(wallboxes_jan_aug_DT)
 # summary(wallboxes_jan_aug_DT)
-head(wallboxes_jan_aug_DT, n = 15)
+head(wallboxes_jan_aug_DT, n = 10)
 ```
 
 ## Random Forest Models
+
+Before actually training the models let's **look at the feature importance** and see how they perform in comparison to a total random feature.
+
+```{r feature importance}
+# add random feature
+wallboxes_jan_aug_DT[, random := runif(nrow(wallboxes_jan_aug_DT), 1, 500)]
+
+fit.ranger <- ranger(total_power ~ . - Date, data = wallboxes_jan_aug_DT, importance = "permutation")
+imp <- importance(fit.ranger)
+imp <- data.table(Feature = names(imp), importance = imp)
+
+plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
+  layout(xaxis = list(categoryorder="total descending"))
+
+# remove random feature again
+wallboxes_jan_aug_DT[, random := NULL]
+```
+
 
 Finally let's **train multiple random forest models and always try predicting the total_power that will be used on the next day using the data of the last 14 days.** After that I calculate the **average Mean Absolute Error (MAE)** of all models and the **average Mean Absolute Percentage Error (MAPE)** of all models so that I have some metrics I can use for evaluating the models.
 
@@ -137,10 +156,10 @@ while (end_date <= as.Date("2022-08-21")) {
 }
 
 mean_absolute_error <- mean(unlist(errors))
-mean_absolute_error
+print(paste("MAE:", mean_absolute_error))
 
 mean_absolute_percentage_error <- mean(unlist(mape_errors))
-mean_absolute_percentage_error
+print(paste("MAPE: ", mean_absolute_percentage_error, "%", sep = ""))
 ```
 
 Let's also look at a plot to better **visualize the results.** The first plot uses *lines+markers* to better identify the single points, the second one only uses *lines*.
