@@ -29,7 +29,7 @@ wallboxes_jan_aug_DT[, total_power_same_day_previous_week := shift(total_power, 
 # install.packages("zoo")
 library(zoo)
 wallboxes_jan_aug_DT <- wallboxes_jan_aug_DT %>%
-                          mutate(total_power_last_seven_days = rollmean(total_power, k = 7, fill = NA, align = "right"))
+                          mutate(average_total_power_last_seven_days = rollmean(total_power, k = 7, fill = NA, align = "right"))
                                  # total_power_last_six_days = rollmean(total_power, k = 6, fill = NA, align = "right"),
                                  # total_power_last_five_days = rollmean(total_power, k = 5, fill = NA, align = "right"),
                                  # total_power_last_four_days = rollmean(total_power, k = 4, fill = NA, align = "right"),
@@ -41,7 +41,7 @@ wallboxes_jan_aug_DT <- wallboxes_jan_aug_DT %>%
 # total_power of this day already. Therefore all of the solutions have to be shifted by 1. So that for example the rolling average
 # of the first 7 days is written in row 8. Meaning we can use this knowledge to predict total_power on day 8.
 
-wallboxes_jan_aug_DT[, total_power_last_seven_days := shift(total_power_last_seven_days, 1)]
+wallboxes_jan_aug_DT[, average_total_power_last_seven_days := shift(average_total_power_last_seven_days, 1)]
 # wallboxes_jan_aug_DT[, total_power_last_six_days := shift(total_power_last_six_days, 1)]
 # wallboxes_jan_aug_DT[, total_power_last_five_days := shift(total_power_last_five_days, 1)]
 # wallboxes_jan_aug_DT[, total_power_last_four_days := shift(total_power_last_four_days, 1)]
@@ -65,9 +65,13 @@ wallboxes_jan_aug_DT[, total_power_last_seven_days := shift(total_power_last_sev
 # wallboxes_oct_2022_feb_2023_DT[, total_power_last_two_days := shift(total_power_last_two_days, 1)]
 
 # 4. weekend or not
-wallboxes_jan_aug_DT[, weekend := weekdays(Date)]
-wallboxes_jan_aug_DT$weekend <- ifelse(wallboxes_jan_aug_DT$weekend %in% c("Samstag", "Sonntag"), 1, 0)
+wallboxes_jan_aug_DT[, is_weekend := weekdays(Date)]
+wallboxes_jan_aug_DT$is_weekend <- ifelse(wallboxes_jan_aug_DT$is_weekend %in% c("Samstag", "Sonntag"), 1, 0)
+# wallboxes_jan_aug_DT[, weekend := as.factor(weekend)]
 
+str(wallboxes_jan_aug_DT)
+summary(wallboxes_jan_aug_DT)
+head(wallboxes_jan_aug_DT, n = 15)
 
 ## Remove NA values ----
 # remove rows containing NA values -> because we shifted some values
@@ -106,6 +110,14 @@ summary(wallboxes_jan_aug_DT)
 # test_x <- data[!idx, !"total_power"]
 # test_y <- data[!idx, total_power]
 # test_jan_aug <- jan_aug[-idx]
+
+## let's try scaling ----
+# Date <- actuals$Date
+# actuals[, Date := NULL]
+# actuals <- as.data.table(scale(actuals)) 
+# centering <- attr(actuals, "scaled:center")  # later used for rescaling test with same 
+# scaling <- attr(actuals, "scaled:scale")  # later used for rescaling test with same 
+# actuals[, Date := Date]
 
 
 ## Feature importance ----
@@ -330,20 +342,27 @@ plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
 wallboxes_jan_aug_DT[, random := NULL]
 
 # predict next day using last 14 days
+MAPE <- function(predicted, actual){
+  mape <- mean(abs((actual - predicted)/actual))*100
+  return (mape)
+}
+
 actuals <- wallboxes_jan_aug_DT
 start_date <- as.Date("2022-01-08")
 end_date <- as.Date("2022-01-22")
-predicted_date <- list()
+predicted_date <- list() # the date I tried to predict will get stored in this list
 predictions <- list() # the predictions will get stored in this list
-real_values <- list()
-errors <- list() # the errors will get stored in this list
+real_values <- list() # the actual values will get stored in this list
+errors <- list() # the MAE for each model will get stored in this list
+mape_errors <- list() # the MAPE for each model will get stored in this list
+
 i <- 1
-while (end_date <= as.Date("2022-08-21")) {
+while (end_date <= as.Date("2022-01-23")) {
   
-  print(paste('Currently calculating prediction for', end_date))
-  
-  training <- actuals[actuals$Date >= start_date, ]
-  training <- actuals[actuals$Date < end_date,] # use 2 weeks to train the model
+  print(paste('Currently calculating prediction for', end_date, '| Start Date:', start_date))
+  training <- actuals[Date >= start_date & Date < end_date,]
+  print(nrow(training))
+  print(training)
   test <- actuals[actuals$Date == end_date]
   
   rf_model <- train(total_power ~ . - Date, 
@@ -355,7 +374,8 @@ while (end_date <= as.Date("2022-08-21")) {
   predicted_date[[i]] <- end_date
   actual <- test$total_power
   real_values[[i]] <- actual
-  errors[[i]] <- abs(pred - actual) # store the difference between prediction vs actual value
+  errors[[i]] <- abs(actual - pred) # store the difference between actual and predicted value
+  mape_errors[[i]] <- MAPE(pred, actual)
   
   i <- i+1
   
@@ -366,11 +386,16 @@ while (end_date <= as.Date("2022-08-21")) {
 mean_absolute_error <- mean(unlist(errors))  # calculate MAE (Mean Absolute Error)
 mean_absolute_error
 
+mean_absolute_percentage_error <- mean(unlist(mape_errors))
+mean_absolute_percentage_error
+
+# lines+markers
 plot_ly() %>%
   add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines+markers') %>%
   add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines+markers') %>%
   layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
 
+# only lines
 plot_ly() %>%
   add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines') %>%
   add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines') %>%
