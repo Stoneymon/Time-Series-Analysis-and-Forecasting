@@ -258,11 +258,11 @@ pred_ts$Time <- as.POSIXct(pred_ts$Time)
 actual_data <- pred_ts %>% filter(name == "wallboxes")
 forecast_data <- pred_ts %>% filter(name == "forecast")
 
-# Create plotly plot
-plot_ly() %>%
-  add_trace(data = actual_data, x = ~Time, y = ~value, name = "actual", type = 'scatter', mode = 'lines') %>%
-  add_trace(data = forecast_data, x = ~Time, y = ~value, name = 'predictions', mode = 'lines') %>%
-  layout(title = 'RNN+LSTM Forecast')
+# # Create plotly plot
+# plot_ly() %>%
+#   add_trace(data = actual_data, x = ~Time, y = ~value, name = "actual", type = 'scatter', mode = 'lines') %>%
+#   add_trace(data = forecast_data, x = ~Time, y = ~value, name = 'predictions', mode = 'lines') %>%
+#   layout(title = 'RNN+LSTM Forecast')
 
 
 # Calculation MAPE and MAE 
@@ -274,7 +274,12 @@ forecast_data_august <- forecast_data %>% filter(month(Time) == 8)
 plot_ly() %>%
   add_trace(data = actual_data_august, x = ~Time, y = ~value, name = "actual", type = 'scatter', mode = 'lines') %>%
   add_trace(data = forecast_data_august, x = ~Time, y = ~value, name = 'predictions', mode = 'lines') %>%
-  layout(title = 'RNN+LSTM Forecast')
+  layout(title = 'RNN+LSTM Forecast',
+         yaxis = list(title = "kWh"),
+         xaxis = list(title = "Hours")
+         
+         
+  )
 
 # Check if they have the same length
 if (length(actual_data_august$value) == length(forecast_data_august$value)) {
@@ -286,6 +291,122 @@ if (length(actual_data_august$value) == length(forecast_data_august$value)) {
   print(paste0("Mean Absolute Percentage Error (MAPE) for August: ", mape_value))
   
 }
+
+# Summarizing Data to Daily to compare models
+
+actual_data_august_daily <- actual_data_august %>%
+  group_by(Time = floor_date(Time, '1 day')) %>%
+  summarise(daily_total = sum(value))
+
+forecast_data_august_daily <- forecast_data_august %>%
+  group_by(Time = floor_date(Time, '1 day')) %>%
+  summarise(daily_total = sum(value))
+
+plot_ly() %>%
+  add_trace(data = actual_data_august_daily, x = ~Time, y = ~daily_total, name = "actual", type = 'scatter', mode = 'lines') %>%
+  add_trace(data = forecast_data_august_daily, x = ~Time, y = ~daily_total, name = 'predictions', mode = 'lines') %>%
+  layout(title = 'RNN+LSTM Forecast',
+         yaxis = list(title = "kW per day"),
+         xaxis = list(title = "Days")
+         
+         
+  )
+
+if (length(actual_data_august_daily$daily_total) == length(forecast_data_august_daily$daily_total)) {
+  
+  mae_value <- mae(actual_data_august_daily$daily_total, forecast_data_august_daily$daily_total)
+  print(paste0("Mean Absolute Error (MAE) for August [Daily]: ", mae_value))
+  
+  mape_value <- mape(actual_data_august_daily$daily_total, forecast_data_august_daily$daily_total)
+  print(paste0("Mean Absolute Percentage Error (MAPE) for August [Daily]: ", mape_value))
+  
+}
+
+# Finally I want to plot the entire January to August Data
+
+#####
+
+test_viz <- wallboxes_h_ts
+
+# Converting it to matrix form
+test_viz_matrix <- test_viz %>%
+  as_tibble() %>%
+  select(wallboxes) %>%
+  as.matrix()
+
+# Creating a dataset and dataloader
+viz_ds <- demand_dataset(test_viz_matrix, n_timesteps)
+viz_dl <- viz_ds %>% dataloader(batch_size = length(viz_ds))
+
+# Making predictions
+preds  <- predict(fitted, viz_dl)
+
+# Converting the torch tensor to R array
+preds <- preds$to(device = "cpu") %>% as.matrix()
+preds <- c(rep(NA, n_timesteps), preds)
+preds
+
+pred_ts <- test_viz %>%
+  add_column(forecast = preds * train_sd + train_mean) %>%
+  pivot_longer(-Time) %>%
+  update_tsibble(key = name)
+
+pred_ts
+actual_data <- pred_ts %>% filter(name == "wallboxes")
+forecast_data <- pred_ts %>% filter(name == "forecast")
+
+actual_data_daily <- actual_data %>%
+  mutate(Date=as.Date(Time)) %>%
+  filter(month(Date) > 1) %>%
+  index_by(Date = floor_date(Date, '1 day')) %>%
+  summarise(daily_total = sum(value))
+
+  #summarise(daily_total = sum(value))
+
+forecast_data_daily <- forecast_data %>%
+  mutate(Date=as.Date(Time)) %>%
+  filter(month(Date) > 1) %>%
+  index_by(Date = floor_date(Date, '1 day')) %>%
+  summarise(daily_total = sum(value))
+
+
+
+
+plot_ly() %>%
+  add_trace(data = actual_data_daily, x = ~Date, y = ~daily_total, name = "actual", type = 'scatter', mode = 'lines') %>%
+  add_trace(data = forecast_data_daily, x = ~Date, y = ~daily_total, name = 'predictions', mode = 'lines') %>%
+  layout(title = 'RNN+LSTM Forecast',
+         yaxis = list(title = "kW per day"),
+         xaxis = list(title = "Days")
+         
+         
+  )
+
+if (length(actual_data_daily$daily_total) == length(forecast_data_daily$daily_total)) {
+  
+  mae_value <- mae(actual_data_daily$daily_total, forecast_data_daily$daily_total)
+  print(paste0("Mean Absolute Error (MAE) for August [Daily]: ", mae_value))
+  
+  mape_value <- mape(actual_data_daily$daily_total, forecast_data_daily$daily_total)
+  print(paste0("Mean Absolute Percentage Error (MAPE) for August [Daily]: ", mape_value))
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 
+
 
 
 # End Hourly
