@@ -67,7 +67,7 @@ wallboxes_jan_aug_DT[, average_total_power_last_seven_days := shift(average_tota
 # 4. weekend or not
 wallboxes_jan_aug_DT[, is_weekend := weekdays(Date)]
 wallboxes_jan_aug_DT$is_weekend <- ifelse(wallboxes_jan_aug_DT$is_weekend %in% c("Samstag", "Sonntag"), 1, 0)
-# wallboxes_jan_aug_DT[, weekend := as.factor(weekend)]
+# wallboxes_jan_aug_DT[, is_weekend := as.factor(is_weekend)]
 
 str(wallboxes_jan_aug_DT)
 summary(wallboxes_jan_aug_DT)
@@ -357,12 +357,11 @@ errors <- list() # the MAE for each model will get stored in this list
 mape_errors <- list() # the MAPE for each model will get stored in this list
 
 i <- 1
-while (end_date <= as.Date("2022-01-23")) {
+while (end_date <= as.Date("2022-08-21")) {
   
   print(paste('Currently calculating prediction for', end_date, '| Start Date:', start_date))
+  
   training <- actuals[Date >= start_date & Date < end_date,]
-  print(nrow(training))
-  print(training)
   test <- actuals[actuals$Date == end_date]
   
   rf_model <- train(total_power ~ . - Date, 
@@ -377,7 +376,7 @@ while (end_date <= as.Date("2022-01-23")) {
   errors[[i]] <- abs(actual - pred) # store the difference between actual and predicted value
   mape_errors[[i]] <- MAPE(pred, actual)
   
-  i <- i+1
+  i <- i + 1
   
   start_date <- start_date + 1
   end_date <- end_date + 1

@@ -26,7 +26,7 @@ library(ranger)
 library(caret)
 
 # Set Seed
-set.seed(123)
+set.seed(1234)
 ```
 
 # Task: Predict the total_power that will be drained from the wallboxes on the next day using data of the last 14 days.
@@ -149,7 +149,7 @@ while (end_date <= as.Date("2022-08-21")) {
   errors[[i]] <- abs(actual - pred) # store the difference between actual and predicted value
   mape_errors[[i]] <- MAPE(pred, actual)
   
-  i <- i+1
+  i <- i + 1
   
   start_date <- start_date + 1
   end_date <- end_date + 1
