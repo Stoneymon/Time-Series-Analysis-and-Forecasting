@@ -1,0 +1,185 @@
+---
+title: "30_machine_learning_model"
+author: "Daniel Molnar"
+date: "2023-06-02"
+output:
+  rmdformats::robobook:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set Working Directory
+if (rstudioapi::isAvailable()) {
+  setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+}
+
+# Install Libraries
+# install.packages("zoo")
+
+# Load Libraries
+library(data.table)
+library(plotly)
+library(zoo)
+library(ranger)
+library(caret)
+
+# Set Seed
+set.seed(1234)
+```
+
+# Task: Predict the total_power that will be drained from the wallboxes on the next day using data of the last 14 days.
+
+## Import Data
+
+The **data is already preprocessed.** I just removed one additional feature we used for plotting in another task.
+
+```{r import data}
+wallboxes_jan_aug_DT <- fread("./data/preprocessed/total_power_jan-aug.csv")
+
+wallboxes_jan_aug_DT[, battery_SOC := NULL]
+```
+
+## Feature Engineering
+
+For this task I performed some feature engineering where I tried to enrich the data I have so far. I started off with two columns, namely *Date* and *total_power*. Finally, I came up with **4 new features:**
+
+- **total_power_previous_day:** As the name already suggests I added a column containing the *total_power* that was used on the previous day.
+- **total_power_same_day_previous_week:** Again very simple I added a column containing the *total_power* that was used on the same day last week.
+- **average_total_power_last_seven_days:** For this I calculated the average *total_power* that was used during the last seven days.
+- **is_weekend:** This column is set to 1 if the corresponding *Date* was a weekend (saturday, sunday; in my case "Samstag", "Sonntag" because of german language) or 0 if it was a normal weekday.
+
+```{r feature engineering, warning=FALSE}
+# 1. total_power used on previous day
+wallboxes_jan_aug_DT[, total_power_previous_day := shift(total_power, 1)]
+
+# 2. total_power used on the same day last week
+wallboxes_jan_aug_DT[, total_power_same_day_previous_week := shift(total_power, 7)]
+
+# 3. average total_power that was used in the last 7 days (rolling average)
+wallboxes_jan_aug_DT <- wallboxes_jan_aug_DT %>%
+                          mutate(average_total_power_last_seven_days = rollmean(total_power, k = 7, fill = NA, align = "right"))
+                                 
+# I found out that this calculation sums the last X values and divides it by X and then writes it to row X, this doesn't
+# make sense because when we want to predict the total_power that will be used on a day then we of course don't know the
+# total_power of this day already. Therefore all of the solutions have to be shifted by 1. So that for example the rolling average
+# of the first 7 days is written in row 8. Meaning we can use this knowledge to predict total_power on day 8.
+
+wallboxes_jan_aug_DT[, average_total_power_last_seven_days := shift(average_total_power_last_seven_days, 1)]
+
+# 4. weekend or not
+wallboxes_jan_aug_DT[, is_weekend := weekdays(Date)]
+wallboxes_jan_aug_DT$is_weekend <- ifelse(wallboxes_jan_aug_DT$is_weekend %in% c("Samstag", "Sonntag"), 1, 0)
+```
+
+Let's have a look at the data so far.
+
+```{r look at data}
+str(wallboxes_jan_aug_DT)
+summary(wallboxes_jan_aug_DT)
+head(wallboxes_jan_aug_DT, n = 10)
+```
+
+As you can see I now have some NA values because I shifted the data around. Let's remove observations containing NAs in one of their columns.
+
+```{r remove NA}
+# colSums(is.na(wallboxes_jan_aug_DT))
+wallboxes_jan_aug_DT <- na.omit(wallboxes_jan_aug_DT)
+# str(wallboxes_jan_aug_DT)
+# summary(wallboxes_jan_aug_DT)
+head(wallboxes_jan_aug_DT, n = 10)
+```
+
+## Random Forest Models
+
+Before actually training the models let's **look at the feature importance** and see how they perform in comparison to a total random feature.
+
+```{r feature importance}
+# add random feature
+wallboxes_jan_aug_DT[, random := runif(nrow(wallboxes_jan_aug_DT), 1, 500)]
+
+fit.ranger <- ranger(total_power ~ . - Date, data = wallboxes_jan_aug_DT, importance = "permutation")
+imp <- importance(fit.ranger)
+imp <- data.table(Feature = names(imp), importance = imp)
+
+plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
+  layout(xaxis = list(categoryorder="total descending"))
+
+# remove random feature again
+wallboxes_jan_aug_DT[, random := NULL]
+```
+
+
+Finally let's **train multiple random forest models and always try predicting the total_power that will be used on the next day using the data of the last 14 days.** After that I calculate the **average Mean Absolute Error (MAE)** of all models and the **average Mean Absolute Percentage Error (MAPE)** of all models so that I have some metrics I can use for evaluating the models.
+
+```{r random forest without Date, warning=FALSE}
+MAPE <- function(predicted, actual){
+  mape <- mean(abs((actual - predicted)/actual))*100
+  return (mape)
+}
+
+actuals <- wallboxes_jan_aug_DT
+start_date <- as.Date("2022-01-08")
+end_date <- as.Date("2022-01-22")
+predicted_date <- list() # the date I tried to predict will get stored in this list
+predictions <- list() # the predictions will get stored in this list
+real_values <- list() # the actual values will get stored in this list
+errors <- list() # the MAE for each model will get stored in this list
+mape_errors <- list() # the MAPE for each model will get stored in this list
+
+i <- 1
+while (end_date <= as.Date("2022-08-21")) {
+  
+  # print(paste('Currently calculating prediction for', end_date))
+  
+  # use only the last 14 days to train a RF model
+  training <- actuals[Date >= start_date & Date < end_date,]
+  test <- actuals[actuals$Date == end_date]
+  
+  rf_model <- train(total_power ~ . - Date, 
+                    data = training, 
+                    method = "ranger")
+  
+  pred <- predict(rf_model, newdata = test) # predict 1 day
+  predictions[[i]] <- pred # store the prediction
+  predicted_date[[i]] <- end_date
+  actual <- test$total_power
+  real_values[[i]] <- actual
+  errors[[i]] <- abs(actual - pred) # store the difference between actual and predicted value
+  mape_errors[[i]] <- MAPE(pred, actual)
+  
+  i <- i + 1
+  
+  start_date <- start_date + 1
+  end_date <- end_date + 1
+}
+
+mean_absolute_error <- mean(unlist(errors))
+print(paste("MAE:", mean_absolute_error))
+
+mean_absolute_percentage_error <- mean(unlist(mape_errors))
+print(paste("MAPE: ", mean_absolute_percentage_error, "%", sep = ""))
+```
+
+Let's also look at a plot to better **visualize the results.** The first plot uses *lines+markers* to better identify the single points, the second one only uses *lines*.
+
+```{r plots without Date}
+# lines+markers
+plot_ly() %>%
+  add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines+markers') %>%
+  add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines+markers') %>%
+  layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
+
+# only lines
+plot_ly() %>%
+  add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines') %>%
+  add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines') %>%
+  layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
+```
+
+
+
+
+
+

@@ -86,10 +86,14 @@ wallboxes_oct_2022_feb_2023 <- data.table(Date=data_wallboxes_2$V1,
                                           Delta_Wallbox=data_wallboxes_2$LEM.Delta_Wallbox.Wirkleistung_P,
                                           Raption_50=data_wallboxes_2$LEM.Raption_50.Wirkleistung_P)
 
-wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% mutate(Date=as.Date(Date))
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% mutate(Date=as.POSIXct(Date))
 wallboxes_oct_2022_feb_2023$total.P <- rowSums(wallboxes_oct_2022_feb_2023[, c(2:9)])
-wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% group_by(Date) %>% 
-  summarize(total_power = sum(total.P))
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>%
+  group_by(Date=floor_date(Date, '1 hour')) %>% 
+  summarize(total_power=mean(total.P))
+
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% mutate(Date=as.Date(Date))
+wallboxes_oct_2022_feb_2023 <- wallboxes_oct_2022_feb_2023 %>% group_by(Date) %>% summarize(total_power = sum(total_power))
 
 SOC <- data_battery_1 %>% mutate(V1=as.Date(V1))
 SOC <- subset(SOC, select=c("V1", "LEM.Overview.Battery_SOC"))
@@ -97,7 +101,7 @@ SOC <- SOC %>% group_by(V1) %>% summarize(battery_soc = mean(LEM.Overview.Batter
 
 wallboxes_jan_aug$battery_SOC <- SOC$battery_soc
 
-# 1.5 save as csv ----
+# 1.5 save as xlsx ----
 dir.create("./data/preprocessed", showWarnings = FALSE)
 
 write_xlsx(data_battery_1, path="./data/preprocessed/battery_jan-aug.xlsx")
@@ -106,3 +110,12 @@ write_xlsx(data_photovoltaic_1, path="./data/preprocessed/photovoltaic_jan-aug.x
 write_xlsx(data_wallboxes_1, path="./data/preprocessed/wallboxes_jan-aug.xlsx")
 write_xlsx(wallboxes_jan_aug, path="./data/preprocessed/total_power_jan-aug.xlsx")
 write_xlsx(SOC, path="./data/preprocessed/SOC_jan-aug.xlsx")
+
+# 1.6 save as csv ----
+
+fwrite(data_battery_1, file="./data/preprocessed/battery_jan-aug.csv")
+fwrite(data_grid_1, file="./data/preprocessed/grid_jan-aug.csv")
+fwrite(data_photovoltaic_1, file="./data/preprocessed/photovoltaic_jan-aug.csv")
+fwrite(data_wallboxes_1, file="./data/preprocessed/wallboxes_jan-aug.csv")
+fwrite(wallboxes_jan_aug, file="./data/preprocessed/total_power_jan-aug.csv")
+fwrite(SOC, file="./data/preprocessed/SOC_jan-aug.csv")
