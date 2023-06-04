@@ -40,6 +40,8 @@ start <- 1L
 end <- 48L
 predictions <- list() # the predictions will get stored in this list
 errors <- list() # the errors will get stored in this list
+pes <- list() # list of percentage errors
+actuals <- list()
 i <- 1
 set.seed(1234)
 while (end < (nrow(grid_pred_dt) - 1)) {
@@ -47,16 +49,25 @@ while (end < (nrow(grid_pred_dt) - 1)) {
   test <- grid_pred_dt[end,]
   test_x <- test[,!"grid_next_hour"]
   test_y <- test[,"grid_next_hour"]
+  actuals[[i]] <- test_y
   fit.ranger <- ranger(grid_next_hour ~ ., data = training, importance = "permutation")
   pred <- predict(object = fit.ranger, data = test_x)$predictions
   predictions[[i]] <- pred
-  errors <- abs(test_y$grid_next_hour - pred)
+  error <- abs(test_y$grid_next_hour - pred)
+  errors[[i]] <- error
+  pe <- error/abs(test_y$grid_next_hour) * 100
+  pes[[i]] <- pe
   start <- start + 1L
   end <- end + 1L
   i <- i + 1
 }
 mean_error <- mean(unlist(errors))
 mean_error
+mape <- mean(unlist(pes))
+mape
+library(MLmetrics)
+MAE(unlist(predictions), unlist(actuals))
+MAPE(unlist(predictions), unlist(actuals))
 
 # mean error: 34.01283
 # mean error with day_of_week column: 34.19935
@@ -68,4 +79,4 @@ results$pred <- unlist(predictions)
 
 plot_ly(results, x = ~Time, y = ~grid_next_hour, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
   add_trace(y = ~pred, name = 'predictions_rf_test', mode = 'lines+markers') %>%
-  layout(title = 'Random Forest Test')
+  layout(title = 'Random Forest Test', yaxis=list(title="grid (kWh)"))

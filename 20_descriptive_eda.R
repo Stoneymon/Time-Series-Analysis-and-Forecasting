@@ -22,10 +22,11 @@ summary(wallboxes_jan_aug)
 
 # PLOTTING ----
 ## total power - Battery SOC ----
-plot_ly(wallboxes_jan_aug, x = ~Date, y = ~total_power, type = "scatter", mode="lines", name = "Total Power", fill="tozeroy", 
-        line = list(color = 'rgb(105, 179, 162)')) %>%
-  add_lines(x = ~Date, y = ~battery_SOC, mode = "lines", yaxis = "y2", name="Battery SOC", fill="none", line=list(color="rgb(255, 0, 0)")) %>%
-  layout(yaxis2 = list(overlaying = "y", side = "right"))
+plot_ly(wallboxes_jan_aug, x = ~Date, y = ~total_power, type = "scatter", mode="lines", name = "Total Power", 
+        line = list(color = 'rgb(11, 132, 165)')) %>%
+  layout(yaxis = list(title = "Daily Power (kWh)"))
+  #add_lines(x = ~Date, y = ~battery_SOC, mode = "lines", yaxis = "y2", name="Battery SOC", fill="none", line=list(color="rgb(246, 200, 95)")) %>%
+  #layout(yaxis2 = list(overlaying = "y", side = "right"))
 
 
 

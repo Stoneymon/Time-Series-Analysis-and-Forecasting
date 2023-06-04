@@ -32,33 +32,44 @@ result_plot
 
 # use 2 weeks to train prophet, predict one day
 
-actuals <- subset(wallboxes_jan_aug, select = c("Date", "total_power"))
-names(actuals) <- c("ds", "y")
+data <- subset(wallboxes_jan_aug, select = c("Date", "total_power"))
+names(data) <- c("ds", "y")
 start_date <- as.Date("2022-01-01")
 end_date <- as.Date("2022-01-15")
 predictions <- list() # the predictions will get stored in this list
 errors <- list() # the errors will get stored in this list
+pes <- list()
+actuals <- list()
 i <- 1
 while (end_date <= as.Date("2022-08-21")) {
-  training <- actuals[actuals$ds >= start_date, ]
-  training <- actuals[actuals$ds < end_date,] # use 2 weeks to train the model
+  training <- data[data$ds >= start_date, ]
+  training <- data[data$ds < end_date,] # use 2 weeks to train the model
   m <- prophet(training, weekly.seasonality=TRUE, yearly.seasonality=FALSE, daily.seasonality=FALSE)
   future <- make_future_dataframe(m, periods=1) # predict 1 day
   forecast <- predict(m, future)
   pred <- forecast[nrow(forecast), "yhat"]
   predictions[[i]] <- pred # store the prediction
-  actual <- as.numeric(actuals[actuals$ds == end_date, "y"]) 
-  errors[[i]] <-abs(pred - actual) # store the difference between prediction vs actual value
+  actual <- as.numeric(data[data$ds == end_date, "y"]) 
+  actuals[[i]] <- actual
+  error <- abs(pred - actual)
+  errors[[i]] <- error # store the difference between prediction vs actual value
+  pes <- error/abs(actual) * 100
   i <- i+1
   start_date <- start_date + 1
   end_date <- end_date + 1
 }
 mean_error <- mean(unlist(errors))
 mean_error
+mape <- mean(unlist(pes))
+mape
+library(MLmetrics)
+MAE(unlist(predictions), unlist(actuals))
+MAPE(unlist(predictions), unlist(actuals))
 
-results <- actuals[actuals$ds > as.Date("2022-01-14"),]
+
+results <- data[data$ds > as.Date("2022-01-14"),]
 results$pred <- unlist(predictions)
 result_plot <- plot_ly(results, x = ~ds, y = ~y, name="Actuals", type="scatter", mode="line") %>%
   add_trace(y = ~pred, type="scatter", name="Forecast") %>%
-  layout(xaxis = list(title="Date"), yaxis =list(title="kWh"))
+  layout(xaxis = list(title="Date"), yaxis =list(title="Daily Power (kWh)"))
 result_plot
