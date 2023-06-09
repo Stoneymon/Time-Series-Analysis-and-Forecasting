@@ -1,3 +1,10 @@
+# LOAD LIBRARIES ----
+# install.packages("zoo")
+library(data.table)
+library(plotly)
+library(caret)
+library(zoo)
+
 # IMPORT DATA ----
 wallboxes_jan_aug_DT <- fread("./data/preprocessed/total_power_jan-aug.csv")
 
@@ -26,8 +33,6 @@ wallboxes_jan_aug_DT[, total_power_same_day_previous_week := shift(total_power, 
 # wallboxes_oct_2022_feb_2023_DT[, total_power_same_day_previous_week := shift(total_power, 7)]
 
 # 3. average total_power that was used in the last 7 days (rolling average)
-# install.packages("zoo")
-library(zoo)
 wallboxes_jan_aug_DT <- wallboxes_jan_aug_DT %>%
                           mutate(average_total_power_last_seven_days = rollmean(total_power, k = 7, fill = NA, align = "right"))
                                  # total_power_last_six_days = rollmean(total_power, k = 6, fill = NA, align = "right"),
@@ -71,7 +76,7 @@ wallboxes_jan_aug_DT$is_weekend <- ifelse(wallboxes_jan_aug_DT$is_weekend %in% c
 
 str(wallboxes_jan_aug_DT)
 summary(wallboxes_jan_aug_DT)
-head(wallboxes_jan_aug_DT, n = 15)
+head(wallboxes_jan_aug_DT, n = 10)
 
 ## Remove NA values ----
 # remove rows containing NA values -> because we shifted some values
@@ -332,18 +337,18 @@ summary(wallboxes_jan_aug_DT)
 set.seed(1234)
 
 # check feature importance
-library(ranger)
-wallboxes_jan_aug_DT[, random := runif(nrow(wallboxes_jan_aug_DT), 1, 500)]
-fit.ranger <- ranger(total_power ~ . - Date, data = wallboxes_jan_aug_DT, importance = "permutation")
-imp <- importance(fit.ranger)
-imp <- data.table(Feature = names(imp), importance = imp)
-plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
-  layout(xaxis = list(categoryorder="total descending"))
-wallboxes_jan_aug_DT[, random := NULL]
+# library(ranger)
+# wallboxes_jan_aug_DT[, random := runif(nrow(wallboxes_jan_aug_DT), 1, 100)]
+# fit.ranger <- ranger(total_power ~ . - Date, data = wallboxes_jan_aug_DT, importance = "permutation")
+# imp <- importance(fit.ranger)
+# imp <- data.table(Feature = names(imp), importance = imp)
+# plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
+#   layout(xaxis = list(categoryorder="total descending"))
+# wallboxes_jan_aug_DT[, random := NULL]
 
 # predict next day using last 14 days
 MAPE <- function(predicted, actual){
-  mape <- mean(abs((actual - predicted)/actual))*100
+  mape <- mean(abs((actual - predicted) / actual)) * 100
   return (mape)
 }
 
@@ -355,6 +360,7 @@ predictions <- list() # the predictions will get stored in this list
 real_values <- list() # the actual values will get stored in this list
 errors <- list() # the MAE for each model will get stored in this list
 mape_errors <- list() # the MAPE for each model will get stored in this list
+feature_importance <- list() # the feature importance of each trained model will get stored in this list
 
 i <- 1
 while (end_date <= as.Date("2022-08-21")) {
@@ -366,7 +372,9 @@ while (end_date <= as.Date("2022-08-21")) {
   
   rf_model <- train(total_power ~ . - Date, 
                     data = training, 
-                    method = "ranger")
+                    method = "ranger",
+                    importance = "permutation")
+  feature_importance[[i]] <- varImp(rf_model)
   
   pred <- predict(rf_model, newdata = test) # predict 1 day
   predictions[[i]] <- pred # store the prediction
@@ -382,6 +390,26 @@ while (end_date <= as.Date("2022-08-21")) {
   end_date <- end_date + 1
 }
 
+# feature importance
+aggregated_feature_importance <- data.table(Feature = rownames(feature_importance[[1]]$importance), importance = c(0, 0, 0, 0))
+plots <- list()
+y <- 1
+for (x in feature_importance) {
+  imp <- data.table(Feature = rownames(x$importance), importance = x$importance$Overall)
+  aggregated_feature_importance <- rbindlist(list(aggregated_feature_importance, imp))
+  
+  y <- y + 1
+}
+
+colSums(is.na(aggregated_feature_importance))
+aggregated_feature_importance <- na.omit(aggregated_feature_importance)
+divisor <- nrow(aggregated_feature_importance) / 4
+
+aggregated_feature_importance <- aggregated_feature_importance[, sum(importance) / divisor, Feature]
+plot_ly(data=aggregated_feature_importance, x=~Feature, y=~V1, type="bar") %>%
+  layout(xaxis = list(categoryorder="total descending"), yaxis = list(title="Feature Importance"))
+
+# model evaluation
 mean_absolute_error <- mean(unlist(errors))  # calculate MAE (Mean Absolute Error)
 mean_absolute_error
 
@@ -431,4 +459,3 @@ plot_ly() %>%
 # wallboxes_oct_2022_feb_2023_rf <- predict(fit.ranger, data = wallboxes_oct_2022_feb_2023_DT)
 # plot_ly(wallboxes_oct_2022_feb_2023_DT, x = oct_feb, y = ~total_power, name = "actual", type = 'scatter', mode = 'lines+markers') %>%
 #   add_trace(y = ~wallboxes_oct_2022_feb_2023_rf$predictions, name = 'predictions_rf', mode = 'lines+markers') 
-

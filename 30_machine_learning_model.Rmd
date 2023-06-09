@@ -22,7 +22,6 @@ if (rstudioapi::isAvailable()) {
 library(data.table)
 library(plotly)
 library(zoo)
-library(ranger)
 library(caret)
 
 # Set Seed
@@ -84,38 +83,20 @@ head(wallboxes_jan_aug_DT, n = 10)
 As you can see I now have some NA values because I shifted the data around. Let's remove observations containing NAs in one of their columns.
 
 ```{r remove NA}
-# colSums(is.na(wallboxes_jan_aug_DT))
+colSums(is.na(wallboxes_jan_aug_DT))
 wallboxes_jan_aug_DT <- na.omit(wallboxes_jan_aug_DT)
-# str(wallboxes_jan_aug_DT)
-# summary(wallboxes_jan_aug_DT)
 head(wallboxes_jan_aug_DT, n = 10)
 ```
 
 ## Random Forest Models
 
-Before actually training the models let's **look at the feature importance** and see how they perform in comparison to a total random feature.
+Finally let's **train multiple random forest models and always try predicting the total_power that will be used on the next day using the data of the last 14 days.** 
 
-```{r feature importance}
-# add random feature
-wallboxes_jan_aug_DT[, random := runif(nrow(wallboxes_jan_aug_DT), 1, 500)]
-
-fit.ranger <- ranger(total_power ~ . - Date, data = wallboxes_jan_aug_DT, importance = "permutation")
-imp <- importance(fit.ranger)
-imp <- data.table(Feature = names(imp), importance = imp)
-
-plot_ly(data=imp, x=~Feature, y=~importance, type="bar") %>%
-  layout(xaxis = list(categoryorder="total descending"))
-
-# remove random feature again
-wallboxes_jan_aug_DT[, random := NULL]
-```
-
-
-Finally let's **train multiple random forest models and always try predicting the total_power that will be used on the next day using the data of the last 14 days.** After that I calculate the **average Mean Absolute Error (MAE)** of all models and the **average Mean Absolute Percentage Error (MAPE)** of all models so that I have some metrics I can use for evaluating the models.
+After training the models let's have a short **look at the average feature importance.**
 
 ```{r random forest without Date, warning=FALSE}
 MAPE <- function(predicted, actual){
-  mape <- mean(abs((actual - predicted)/actual))*100
+  mape <- mean(abs((actual - predicted) / actual)) * 100
   return (mape)
 }
 
@@ -127,19 +108,21 @@ predictions <- list() # the predictions will get stored in this list
 real_values <- list() # the actual values will get stored in this list
 errors <- list() # the MAE for each model will get stored in this list
 mape_errors <- list() # the MAPE for each model will get stored in this list
+feature_importance <- list() # the feature importance of each trained model will get stored in this list
 
 i <- 1
 while (end_date <= as.Date("2022-08-21")) {
   
-  # print(paste('Currently calculating prediction for', end_date))
+  # print(paste('Currently calculating prediction for', end_date, '| Start Date:', start_date))
   
-  # use only the last 14 days to train a RF model
   training <- actuals[Date >= start_date & Date < end_date,]
   test <- actuals[actuals$Date == end_date]
   
   rf_model <- train(total_power ~ . - Date, 
                     data = training, 
-                    method = "ranger")
+                    method = "ranger",
+                    importance = "permutation")
+  feature_importance[[i]] <- varImp(rf_model)
   
   pred <- predict(rf_model, newdata = test) # predict 1 day
   predictions[[i]] <- pred # store the prediction
@@ -155,12 +138,36 @@ while (end_date <= as.Date("2022-08-21")) {
   end_date <- end_date + 1
 }
 
+# feature importance
+aggregated_feature_importance <- data.table(Feature = rownames(feature_importance[[1]]$importance), importance = c(0, 0, 0, 0))
+plots <- list()
+y <- 1
+for (x in feature_importance) {
+  imp <- data.table(Feature = rownames(x$importance), importance = x$importance$Overall)
+  aggregated_feature_importance <- rbindlist(list(aggregated_feature_importance, imp))
+  
+  y <- y + 1
+}
+
+# colSums(is.na(aggregated_feature_importance))
+aggregated_feature_importance <- na.omit(aggregated_feature_importance)
+divisor <- nrow(aggregated_feature_importance) / 4
+
+aggregated_feature_importance <- aggregated_feature_importance[, sum(importance) / divisor, Feature]
+plot_ly(data=aggregated_feature_importance, x=~Feature, y=~V1, type="bar") %>%
+  layout(xaxis = list(categoryorder="total descending"), yaxis = list(title="Feature Importance"))
+```
+
+For evaluating the models performance I calculate the **average Mean Absolute Error (MAE)** of all models and the **average Mean Absolute Percentage Error (MAPE)** of all models.
+
+```{r model evaluation without Date}
 mean_absolute_error <- mean(unlist(errors))
 print(paste("MAE:", mean_absolute_error))
 
 mean_absolute_percentage_error <- mean(unlist(mape_errors))
 print(paste("MAPE: ", mean_absolute_percentage_error, "%", sep = ""))
 ```
+
 
 Let's also look at a plot to better **visualize the results.** The first plot uses *lines+markers* to better identify the single points, the second one only uses *lines*.
 
@@ -177,9 +184,3 @@ plot_ly() %>%
   add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines') %>%
   layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
 ```
-
-
-
-
-
-
