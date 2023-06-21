@@ -15,17 +15,21 @@ if (rstudioapi::isAvailable()) {
   setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 }
 
-# Install Libraries
-# install.packages("zoo")
-
 # Load Libraries
 library(data.table)
 library(plotly)
 library(zoo)
 library(caret)
+library(ranger)
+
+# Used Functions
+MAPE <- function(predicted, actual){
+  mape <- mean(abs((actual - predicted) / actual)) * 100
+  return (mape)
+}
 
 # Set Seed
-set.seed(1234)
+set.seed(123)
 ```
 
 # Task: Predict the total_power that will be drained from the wallboxes on the next day using data of the last 14 days.
@@ -36,7 +40,6 @@ The **data is already preprocessed.** I just removed one additional feature we u
 
 ```{r import data}
 wallboxes_jan_aug_DT <- fread("./data/preprocessed/total_power_jan-aug.csv")
-
 wallboxes_jan_aug_DT[, battery_SOC := NULL]
 ```
 
@@ -47,7 +50,7 @@ For this task I performed some feature engineering where I tried to enrich the d
 - **total_power_previous_day:** As the name already suggests I added a column containing the *total_power* that was used on the previous day.
 - **total_power_same_day_previous_week:** Again very simple I added a column containing the *total_power* that was used on the same day last week.
 - **average_total_power_last_seven_days:** For this I calculated the average *total_power* that was used during the last seven days.
-- **is_weekend:** This column is set to 1 if the corresponding *Date* was a weekend (saturday, sunday; in my case "Samstag", "Sonntag" because of german language) or 0 if it was a normal weekday.
+- **is_weekend:** This column is set to "Yes" if the corresponding *Date* was a weekend (saturday, sunday; in my case "Samstag", "Sonntag" because of german language) or "No" if it was a normal weekday.
 
 ```{r feature engineering, warning=FALSE}
 # 1. total_power used on previous day
@@ -64,12 +67,13 @@ wallboxes_jan_aug_DT <- wallboxes_jan_aug_DT %>%
 # make sense because when we want to predict the total_power that will be used on a day then we of course don't know the
 # total_power of this day already. Therefore all of the solutions have to be shifted by 1. So that for example the rolling average
 # of the first 7 days is written in row 8. Meaning we can use this knowledge to predict total_power on day 8.
-
 wallboxes_jan_aug_DT[, average_total_power_last_seven_days := shift(average_total_power_last_seven_days, 1)]
 
 # 4. weekend or not
 wallboxes_jan_aug_DT[, is_weekend := weekdays(Date)]
 wallboxes_jan_aug_DT$is_weekend <- ifelse(wallboxes_jan_aug_DT$is_weekend %in% c("Samstag", "Sonntag"), 1, 0)
+wallboxes_jan_aug_DT[, is_weekend := as.factor(is_weekend)]
+wallboxes_jan_aug_DT[, is_weekend := as.factor(ifelse(is_weekend == "1", "Yes", "No"))]
 ```
 
 Let's have a look at the data so far.
@@ -92,45 +96,45 @@ head(wallboxes_jan_aug_DT, n = 10)
 
 Finally let's **train multiple random forest models and always try predicting the total_power that will be used on the next day using the data of the last 14 days.** 
 
-After training the models let's have a short **look at the average feature importance.**
+After training the models let's have a short **look at the aggregated feature importance of all trained models.**
 
 ```{r random forest without Date, warning=FALSE}
-MAPE <- function(predicted, actual){
-  mape <- mean(abs((actual - predicted) / actual)) * 100
-  return (mape)
-}
-
-actuals <- wallboxes_jan_aug_DT
+data <- wallboxes_jan_aug_DT
 start_date <- as.Date("2022-01-08")
 end_date <- as.Date("2022-01-22")
-predicted_date <- list() # the date I tried to predict will get stored in this list
-predictions <- list() # the predictions will get stored in this list
-real_values <- list() # the actual values will get stored in this list
-errors <- list() # the MAE for each model will get stored in this list
-mape_errors <- list() # the MAPE for each model will get stored in this list
-feature_importance <- list() # the feature importance of each trained model will get stored in this list
+predicted_date <- list() # date we tried to predict will get stored in this list
+predictions <- list() # predicted values will get stored in this list
+actuals <- list() # actual values will get stored in this list
+MAEs <- list() # MAE for each model will get stored in this list
+MAPEs <- list() # MAPE for each model will get stored in this list
+feature_importance <- list() # feature importance of each trained model 
+                            # will get stored in this list
 
 i <- 1
-while (end_date <= as.Date("2022-08-21")) {
+while (end_date <= as.Date("2022-08-21")) {  # highest date: 2022-08-21
   
-  # print(paste('Currently calculating prediction for', end_date, '| Start Date:', start_date))
+  print(paste('Start Date:', start_date, '| Predicting:', end_date))
   
-  training <- actuals[Date >= start_date & Date < end_date,]
-  test <- actuals[actuals$Date == end_date]
+  training <- data[Date >= start_date & Date < end_date,]
+  test <- data[data$Date == end_date]
   
   rf_model <- train(total_power ~ . - Date, 
                     data = training, 
                     method = "ranger",
                     importance = "permutation")
-  feature_importance[[i]] <- varImp(rf_model)
+  feature_importance[[i]] <- varImp(rf_model)  # different feature importance
+                                              # than the one that was used above
+                                              # because we use caret here to 
+                                              # train the model
   
-  pred <- predict(rf_model, newdata = test) # predict 1 day
-  predictions[[i]] <- pred # store the prediction
+  pred <- predict(rf_model, newdata = test) # predict next day
+  
+  predictions[[i]] <- pred
   predicted_date[[i]] <- end_date
   actual <- test$total_power
-  real_values[[i]] <- actual
-  errors[[i]] <- abs(actual - pred) # store the difference between actual and predicted value
-  mape_errors[[i]] <- MAPE(pred, actual)
+  actuals[[i]] <- actual
+  MAEs[[i]] <- MAE(pred, actual)
+  MAPEs[[i]] <- MAPE(pred, actual)
   
   i <- i + 1
   
@@ -138,49 +142,62 @@ while (end_date <= as.Date("2022-08-21")) {
   end_date <- end_date + 1
 }
 
-# feature importance
-aggregated_feature_importance <- data.table(Feature = rownames(feature_importance[[1]]$importance), importance = c(0, 0, 0, 0))
-plots <- list()
+## Aggregated Feature Importance ----
+aggregated_feature_importance <- data.table(Feature = rownames(feature_importance[[1]]$importance),
+                                            importance = c(0, 0, 0, 0))
 y <- 1
 for (x in feature_importance) {
-  imp <- data.table(Feature = rownames(x$importance), importance = x$importance$Overall)
-  aggregated_feature_importance <- rbindlist(list(aggregated_feature_importance, imp))
+  imp <- data.table(Feature = rownames(x$importance),
+                    importance = x$importance$Overall)
+  aggregated_feature_importance <- rbindlist(list(aggregated_feature_importance,
+                                                  imp))
   
   y <- y + 1
 }
 
-# colSums(is.na(aggregated_feature_importance))
+colSums(is.na(aggregated_feature_importance))
 aggregated_feature_importance <- na.omit(aggregated_feature_importance)
 divisor <- nrow(aggregated_feature_importance) / 4
 
 aggregated_feature_importance <- aggregated_feature_importance[, sum(importance) / divisor, Feature]
 plot_ly(data=aggregated_feature_importance, x=~Feature, y=~V1, type="bar") %>%
-  layout(xaxis = list(categoryorder="total descending"), yaxis = list(title="Feature Importance"))
+  layout(xaxis = list(categoryorder="total descending"),
+         yaxis = list(title="Feature Importance"))
+
+# -> This plot shows the aggregated feature importance of all the trained models
+```
+
+Let's look at a plot to better **visualize the results.** The first plot uses *lines+markers* to better identify the single points, the second one only uses *lines*.
+
+```{r plots without Date}
+plot_ly() %>%
+  add_trace(x = ~predicted_date, y = ~actuals, name = 'Actuals',
+            type = 'scatter', mode = 'lines+markers') %>%
+  add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions',
+            type = 'scatter', mode = 'lines+markers') %>%
+  layout(title = 'RF predictions using the last 14 days',
+         xaxis = list(title="Date"), yaxis =list(title="kWh"))
+
+# only lines
+plot_ly() %>%
+  add_trace(x = ~predicted_date, y = ~actuals, name = 'Actuals',
+            type = 'scatter', mode = 'lines') %>%
+  add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions',
+            type = 'scatter', mode = 'lines') %>%
+  layout(title = 'RF predictions using the last 14 days',
+         xaxis = list(title="Date"), yaxis =list(title="kWh"))
 ```
 
 For evaluating the models performance I calculate the **average Mean Absolute Error (MAE)** of all models and the **average Mean Absolute Percentage Error (MAPE)** of all models.
 
 ```{r model evaluation without Date}
-mean_absolute_error <- mean(unlist(errors))
+mean_absolute_error <- mean(unlist(MAEs))
 print(paste("MAE:", mean_absolute_error))
 
-mean_absolute_percentage_error <- mean(unlist(mape_errors))
+mean_absolute_percentage_error <- mean(unlist(MAPEs))
 print(paste("MAPE: ", mean_absolute_percentage_error, "%", sep = ""))
 ```
 
-
-Let's also look at a plot to better **visualize the results.** The first plot uses *lines+markers* to better identify the single points, the second one only uses *lines*.
-
-```{r plots without Date}
-# lines+markers
-plot_ly() %>%
-  add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines+markers') %>%
-  add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines+markers') %>%
-  layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
-
-# only lines
-plot_ly() %>%
-  add_trace(x = ~predicted_date, y = ~real_values, name = 'Actuals', type = 'scatter', mode = 'lines') %>%
-  add_trace(x = ~predicted_date, y = ~predictions, name = 'Predictions', type = 'scatter', mode = 'lines') %>%
-  layout(title = 'RF predictions using the last 14 days', xaxis = list(title="Date"), yaxis =list(title="kWh"))
-```
+The **aggregated MAE/MAPE (on the test data)** is **better than** any of the 
+performance measures we tried before when using **different models** (Linear Model, Decison Tree, Random Forest)
+**and different approaches** (80:20 split).
