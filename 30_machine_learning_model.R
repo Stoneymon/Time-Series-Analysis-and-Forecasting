@@ -174,6 +174,10 @@ mean_absolute_error
 mean_absolute_percentage_error <- mean(unlist(MAPEs))
 mean_absolute_percentage_error
 
+result7 <- data.frame("Model" = "Random Forest Final",
+                      "MAE_Test" = mean_absolute_error,
+                      "MAPE_Test" = mean_absolute_percentage_error)
+
 # -> The aggregated MAE/MAPE (on the test data) is better than any of the 
 # performance measures we tried before like Linear Models, Decision Trees and
 # Random Forests
