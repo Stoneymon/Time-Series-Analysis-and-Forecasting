@@ -68,9 +68,12 @@ wallboxes_jan_aug <- data.table(Date=data_wallboxes_1$V1,
 
 wallboxes_jan_aug <- wallboxes_jan_aug %>% mutate(Date=as.POSIXct(Date))
 wallboxes_jan_aug$total.P <- rowSums(wallboxes_jan_aug[, c(2:9)])
+wallboxes_jan_aug_minute <- wallboxes_jan_aug[, c("Date", "total.P")]
 wallboxes_jan_aug <- wallboxes_jan_aug %>%
   group_by(Date=floor_date(Date, '1 hour')) %>%
   summarize(total_power=mean(total.P))
+
+wallboxes_jan_aug_hour <- wallboxes_jan_aug
 
 wallboxes_jan_aug <- wallboxes_jan_aug %>% mutate(Date=as.Date(Date))
 wallboxes_jan_aug <- wallboxes_jan_aug %>% group_by(Date) %>%
@@ -105,4 +108,6 @@ write_xlsx(data_grid_1, path="./data/preprocessed/grid_jan-aug.xlsx")
 write_xlsx(data_photovoltaic_1, path="./data/preprocessed/photovoltaic_jan-aug.xlsx")
 write_xlsx(data_wallboxes_1, path="./data/preprocessed/wallboxes_jan-aug.xlsx")
 write_xlsx(wallboxes_jan_aug, path="./data/preprocessed/total_power_jan-aug.xlsx")
+write_xlsx(wallboxes_jan_aug_minute, path="./data/preprocessed/total_power_jan-aug_minute.xlsx")
+write_xlsx(wallboxes_jan_aug_hour, path="./data/preprocessed/total_power_jan-aug_hour.xlsx")
 write_xlsx(SOC, path="./data/preprocessed/SOC_jan-aug.xlsx")
