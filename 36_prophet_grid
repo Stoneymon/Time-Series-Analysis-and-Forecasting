@@ -1,4 +1,3 @@
-# import required libraries
 library(forecast)
 library(Metrics)
 library(prophet)
@@ -40,6 +39,7 @@ mape_baseline
 # create an empty data frame to store predictions of the model with NO PARAMETER TUNING
 predictions_none <- data.frame(ds = as.Date(character()), yhat = numeric())
 
+# train the prophet model on the training data and make predictions (no tuning)
 for (i in seq(49, nrow(training_prophet), by = 1)) {
   
   start_date <- training_prophet$ds[i-48]
@@ -132,6 +132,52 @@ seasonality <- tuning_results$seasonality[idx]
 n_changepoints <- tuning_results$n_changepoints[idx]
 changepoint_range <- tuning_results$changepoint_range[idx]
 
+# create an empty data frame to store predictions of the model WITH PARAMETER TUNING
+predictions_tuning <- data.frame(ds = as.Date(character()), yhat = numeric())
+
+# train the prophet model on the training data and make predictions (with tuning)
+for (i in seq(49, nrow(training_prophet), by = 1)) {
+  
+  start_date <- training_prophet$ds[i-48]
+  end_date <- training_prophet$ds[i-1]
+  
+  current_data <- training_prophet[training_prophet$ds >= start_date & training_prophet$ds <= end_date, ]
+  
+  model <- prophet(current_data,
+                   changepoint.prior.scale = changepoint,
+                   seasonality.prior.scale = seasonality,
+                   n.changepoints = n_changepoints,
+                   changepoint.range = changepoint_range)
+  
+  future <- data.frame(ds = training_prophet$ds[i])
+  
+  forecast <- predict(model, future)c
+  plot(model, forecast)
+  
+  forecast_subset <- forecast[, c("ds", "trend", "yhat", "yhat_lower", "yhat_upper", "trend_lower", "trend_upper")]
+  
+  predictions_tuning <- rbind(predictions_tuning, forecast_subset)
+  
+  print(i)
+}
+
+# calculate the evaluation metrics of the predictions on training data (with parameter tuning)
+results_tuning <- merge(x = training_prophet, y = predictions_tuning, by = "ds", all.x = TRUE)
+y_true_tuning <- results_tuning$y[49:nrow(results)]
+y_pred_tuning <- results_tuning$yhat[49:nrow(results)]
+mae_tuning <- mae(y_true_tuning, y_pred_tuning)
+mape_tuning <- mape(y_true_tuning, y_pred_tuning)
+mae_tuning
+mape_tuning
+
+# plot the predictions against the actuals
+fig <- plot_ly(results_tuning, x = ~ds, y=~y, type='scatter',  mode='lines', name='actuals') %>%
+  layout(xaxis = list(title = 'Time'), 
+         yaxis = list(title = 'Grid Power (kWh)') )
+fig <- fig %>% add_trace(y = ~yhat, type='scatter',  mode='lines', name='predictions')
+fig
+
+# create empty data frame to store test set predictions
 predictions_test <- data.frame(ds = as.Date(character()), yhat = numeric())
 
 # train prophet model using tuned parameters on test set and create predictions
@@ -171,54 +217,9 @@ for (i in seq(1, nrow(test_prophet), by = 1)) {
   }
 }
 
-# create an empty data frame to store predictions of the model WITH PARAMETER TUNING
-predictions_tuning <- data.frame(ds = as.Date(character()), yhat = numeric())
-
-for (i in seq(49, nrow(training_prophet), by = 1)) {
-  
-  start_date <- training_prophet$ds[i-48]
-  end_date <- training_prophet$ds[i-1]
-  
-  current_data <- training_prophet[training_prophet$ds >= start_date & training_prophet$ds <= end_date, ]
-  
-  model <- prophet(current_data,
-                   changepoint.prior.scale = changepoint,
-                   seasonality.prior.scale = seasonality,
-                   n.changepoints = n_changepoints,
-                   changepoint.range = changepoint_range)
-  
-  future <- data.frame(ds = training_prophet$ds[i])
-  
-  forecast <- predict(model, future)c
-  plot(model, forecast)
-  
-  forecast_subset <- forecast[, c("ds", "trend", "yhat", "yhat_lower", "yhat_upper", "trend_lower", "trend_upper")]
-  
-  predictions_none <- rbind(predictions_tuning, forecast_subset)
-  
-  print(i)
-}
-
-# calculate the evaluation metrics of the predictions on training data (with parameter tuning)
-results_tuning <- merge(x = training_prophet, y = predictions_new, by = "ds", all.x = TRUE)
-y_true_tuning <- results_tuning$y[49:nrow(results)]
-y_pred_tuning <- results_tuning$yhat[49:nrow(results)]
-mae_tuning <- mae(y_true_tuning, y_pred_tuning)
-mape_tuning <- mape(y_true_tuning, y_pred_tuning)
-mae_tuning
-mape_tuning
-
-# plot the predictions against the actuals
-fig <- plot_ly(results_tuning, x = ~ds, y=~y, type='scatter',  mode='lines', name='actuals') %>%
-  layout(xaxis = list(title = 'Time'), 
-         yaxis = list(title = 'Grid Power (kWh)') )
-fig <- fig %>% add_trace(y = ~yhat, type='scatter',  mode='lines', name='predictions')
-fig
-
-results_test <- merge(x = test_prophet, y = predictions_test, by = "ds", all.x = TRUE)
-
 # store the true and predicted values of the test set in variables
 # and calculate the MAE and MAPE of the predictions
+results_test<- merge(x = test_prophet, y = predictions_test, by = "ds", all.x = TRUE)
 y_true_test <- results_test$y
 y_pred_test <- results_test$yhat
 mae_test <- mae(y_true_test, y_pred_test)
@@ -235,7 +236,6 @@ fig
 
 # create a new data table called grid_days, combining the hourly data into daily data,
 # so that we can see how many days cross the power threshold of 50kWh.
-
 grid_days_predicted <- results_test %>%
   group_by(Time=floor_date(ds, '1 day')) %>%
   summarize(Power=sum(yhat))
