@@ -1,0 +1,262 @@
+library(forecast)
+library(Metrics)
+library(prophet)
+library(chron)
+library(useful)
+
+# create a data table called training_prophet containing the columns 'ds' and 'y'
+training <- grid_pred_dt[grid_pred_dt$Time < as.Date("2022-06-21"),]
+setDT(training)
+training_prophet <- subset(training, select= c("Time", "grid"))
+names(training_prophet) <- c("ds", "y")
+
+# create a variable called time_diff which identifies where there are gaps in the data
+# these missing values will be imputed by the prophet model
+training[, time_diff := c(0, diff(Time))]
+has_gap <- subset(training, time_diff > 1)
+
+# plot the training data
+plot_ly(training_prophet, x=~ds, y=~y, type='scatter', mode="line")
+
+# create a data table called test_prophet containing the columns 'ds' and 'y'
+test <- grid_pred_dt[grid_pred_dt$Time >= as.Date("2022-06-21"),]
+test <- test[test$Time > as.Date("2022-02-01"),]
+setDT(test)
+test_prophet <- subset(test, select= c("Time", "grid"))
+names(test_prophet) <- c("ds", "y")
+
+# shift the actual values by 1 and store them in a new column
+baseline <- data.frame(shift.column(data=test_prophet, columns='y', len=1, up=FALSE))
+names(baseline) <- c("ds", "y_pred", "y_true")
+
+# use the shifted values as 'baseline' predictions,
+# and calculate the baseline evaluation metrics using these values.
+mae_baseline <- mae(baseline$y_true, baseline$y_pred)
+mae_baseline
+mape_baseline <- mape(baseline$y_true, baseline$y_pred)
+mape_baseline
+
+# create an empty data frame to store predictions of the model with NO PARAMETER TUNING
+predictions_none <- data.frame(ds = as.Date(character()), yhat = numeric())
+
+# train the prophet model on the training data and make predictions (no tuning)
+for (i in seq(49, nrow(training_prophet), by = 1)) {
+  
+  start_date <- training_prophet$ds[i-48]
+  end_date <- training_prophet$ds[i-1]
+  
+  current_data <- training_prophet[training_prophet$ds >= start_date & training_prophet$ds <= end_date, ]
+  
+  model <- prophet(current_data)
+
+  future <- data.frame(ds = training_prophet$ds[i])
+  
+  forecast <- predict(model, future)c
+  plot(model, forecast)
+  
+  forecast_subset <- forecast[, c("ds", "trend", "yhat", "yhat_lower", "yhat_upper", "trend_lower", "trend_upper")]
+  
+  predictions_none <- rbind(predictions_none, forecast_subset)
+  
+  print(i)
+}
+
+# create a data table with the actual data and the predicted values
+results_none <- merge(x = training_prophet, y = predictions_none, by = "ds", all.x = TRUE)
+
+# calculate the evaluation metrics of the predictions on training data (no parameter tuning)
+y_true_none <- results_none$y[49:nrow(results_none)]
+y_pred_none <- results_none$yhat[49:nrow(results_none)]
+mae_none <- mae(y_true_none, y_pred_none)
+mape_none <- mape(y_true_none, y_pred_none)
+mae_none
+mape_none
+
+# plot the predictions against the actuals
+fig <- plot_ly(results_none, x = ~ds, y=~y, type='scatter',  mode='lines', name='actuals') %>%
+  layout(xaxis = list(title = 'Time'), 
+         yaxis = list(title = 'Grid Power (kWh)') )
+fig <- fig %>% add_trace(y = ~yhat, type='scatter',  mode='lines', name='predictions')
+fig
+
+# create a grid of potential parameter values for the tuned model
+param_grid <- data.table(
+  'changepoint_prior_scale' = c(0.01, 0.1, 0.5, 5, 10, 30),
+  'seasonality_prior_scale' = c(0.01, 0.1, 0.5, 5, 10, 30),
+  'n_changepoints' = c(5, 10, 20, 30, 40, 50),
+  'changepoint_range' = c(0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+)
+
+# create a data frame to store the results of the parameter tuning
+tuning_results <- data.frame(changepoint = numeric(),
+                             seasonality = numeric(),
+                             n_changepoints = numeric(),
+                             changepoint_range = numeric(),
+                             rmse = numeric())
+
+# store the performance metrics for the parameter tuning
+performance_metrics <- data.frame(matrix(ncol = 8, nrow = 0))
+x <- c("horizon", "mse", "rmse", "mae", "mape", "mdape", "smape", "coverage")
+colnames(performance_metrics) <- x
+
+# Use cross validation to evaluate all parameters
+# The loop creates all possible combinations of the four parameters in order to find the best combination
+for (i in 1:nrow(param_grid)) {
+  for (j in 1:nrow(param_grid)) {
+    for (k in 1:nrow(param_grid)) {
+      for (l in 1:nrow(param_grid)) {
+        m <- prophet(training_prophet,
+                     changepoint.prior.scale = param_grid$changepoint_prior_scale[i],
+                     seasonality.prior.scale = param_grid$seasonality_prior_scale[j],
+                     n.changepoints = param_grid$n_changepoints[k],
+                     changepoint.range = param_grid$changepoint_range[l])
+        print(param_grid$changepoint_prior_scale[i])
+        df_cv <- cross_validation(m, horizon = 7, units='days')
+        df_p <- performance_metrics(df_cv)
+        performance_metrics[nrow(performance_metrics) + 1,] <- df_p
+        result <- data.frame(changepoint=param_grid$changepoint_prior_scale[i],
+                             seasonality=param_grid$seasonality_prior_scale[j],
+                             n_changepoints=param_grid$n_changepoints[k],
+                             changepoint_range=param_grid$changepoint_range[l],
+                             rmse= df_p$rmse[1])
+        tuning_results[nrow(tuning_results) + 1,] <- result
+      }
+    }
+  }
+}
+
+# Find the best parameters and assign them to variables to be used in model training
+idx <- which.min(tuning_results$rmse)
+changepoint <- tuning_results$changepoint[idx]
+seasonality <- tuning_results$seasonality[idx]
+n_changepoints <- tuning_results$n_changepoints[idx]
+changepoint_range <- tuning_results$changepoint_range[idx]
+
+# create an empty data frame to store predictions of the model WITH PARAMETER TUNING
+predictions_tuning <- data.frame(ds = as.Date(character()), yhat = numeric())
+
+# train the prophet model on the training data and make predictions (with tuning)
+for (i in seq(49, nrow(training_prophet), by = 1)) {
+  
+  start_date <- training_prophet$ds[i-48]
+  end_date <- training_prophet$ds[i-1]
+  
+  current_data <- training_prophet[training_prophet$ds >= start_date & training_prophet$ds <= end_date, ]
+  
+  model <- prophet(current_data,
+                   changepoint.prior.scale = changepoint,
+                   seasonality.prior.scale = seasonality,
+                   n.changepoints = n_changepoints,
+                   changepoint.range = changepoint_range)
+  
+  future <- data.frame(ds = training_prophet$ds[i])
+  
+  forecast <- predict(model, future)c
+  plot(model, forecast)
+  
+  forecast_subset <- forecast[, c("ds", "trend", "yhat", "yhat_lower", "yhat_upper", "trend_lower", "trend_upper")]
+  
+  predictions_tuning <- rbind(predictions_tuning, forecast_subset)
+  
+  print(i)
+}
+
+# calculate the evaluation metrics of the predictions on training data (with parameter tuning)
+results_tuning <- merge(x = training_prophet, y = predictions_tuning, by = "ds", all.x = TRUE)
+y_true_tuning <- results_tuning$y[49:nrow(results)]
+y_pred_tuning <- results_tuning$yhat[49:nrow(results)]
+mae_tuning <- mae(y_true_tuning, y_pred_tuning)
+mape_tuning <- mape(y_true_tuning, y_pred_tuning)
+mae_tuning
+mape_tuning
+
+# plot the predictions against the actuals
+fig <- plot_ly(results_tuning, x = ~ds, y=~y, type='scatter',  mode='lines', name='actuals') %>%
+  layout(xaxis = list(title = 'Time'), 
+         yaxis = list(title = 'Grid Power (kWh)') )
+fig <- fig %>% add_trace(y = ~yhat, type='scatter',  mode='lines', name='predictions')
+fig
+
+# create empty data frame to store test set predictions
+predictions_test <- data.frame(ds = as.Date(character()), yhat = numeric())
+
+# train prophet model using tuned parameters on test set and create predictions
+for (i in seq(1, nrow(test_prophet), by = 1)) {
+  
+  if (i < 49) {
+    future <- data.frame(ds = test_prophet$ds[i])
+    forecast <- predict(model, future)
+    forecast_subset <- forecast[, c("ds", "trend", "yhat", "yhat_lower", "yhat_upper", "trend_lower", "trend_upper")]
+    predictions_test <- rbind(predictions_test, forecast_subset)
+    print(i)
+  }
+  else {
+    
+    start_date <- test_prophet$ds[i-48]
+    end_date <- test_prophet$ds[i-1]
+    
+    current_data <- test_prophet[test_prophet$ds >= start_date & test_prophet$ds <= end_date, ]
+    
+    model1 <- prophet(current_data, 
+                      changepoint.prior.scale = changepoint,
+                      seasonality.prior.scale = seasonality,
+                      n.changepoints = n_changepoints,
+                      changepoint.range = changepoint_range)
+    
+    future <- data.frame(ds = test_prophet$ds[i])
+    
+    forecast <- predict(model1, future)
+    plot(model1, forecast)
+    
+    forecast_subset <- forecast[, c("ds", "trend", "yhat", "yhat_lower", "yhat_upper", "trend_lower", "trend_upper")]
+    
+    predictions_test <- rbind(predictions_test, forecast_subset)
+    
+    print(i)
+    
+  }
+}
+
+# store the true and predicted values of the test set in variables
+# and calculate the MAE and MAPE of the predictions
+results_test<- merge(x = test_prophet, y = predictions_test, by = "ds", all.x = TRUE)
+y_true_test <- results_test$y
+y_pred_test <- results_test$yhat
+mae_test <- mae(y_true_test, y_pred_test)
+mae_test
+mape_test <- mape(y_true_test, y_pred_test)
+mape_test
+
+# plot the results of the test set predictions
+fig <- plot_ly(results_test, x = ~ds, y=~y, type='scatter',  mode='lines', name='actuals') %>%
+  layout(xaxis = list(title = 'Time'), 
+         yaxis = list(title = 'Grid Power (kWh)') )
+fig <- fig %>% add_trace(y = ~yhat, type='scatter',  mode='lines', name='predictions')
+fig
+
+# create a new data table called grid_days, combining the hourly data into daily data,
+# so that we can see how many days cross the power threshold of 50kWh.
+grid_days_predicted <- results_test %>%
+  group_by(Time=floor_date(ds, '1 day')) %>%
+  summarize(Power=sum(yhat))
+
+grid_days_actual <- results_test %>%
+  group_by(Time=floor_date(ds, '1 day')) %>%
+  summarize(Power=sum(y))
+
+grid_days <- data.table(date=grid_days_actual$Time, actual=grid_days_actual$Power, predicted=grid_days_predicted$Power)
+
+# assign variables to the actual and predicted values of the daily grid data.
+power_true <- grid_days$actual
+power_pred <- grid_days$predicted
+# calculate the evaluation metrics (MAE and MAPE) of the predicted daily grid data.
+mae_grid <- mae(power_true, power_pred)
+mae_grid
+mape_grid <- mape(power_true, power_pred)
+mape_grid
+
+# calculate how many days actual values pass the threshold of 50kWh, 
+# and how many of those days were accurately predicted to cross 50kWh.
+grid_days$threshold <- (grid_days$actual < 50) & (grid_days$predicted < 50) 
+sum(grid_days$threshold==TRUE)
+

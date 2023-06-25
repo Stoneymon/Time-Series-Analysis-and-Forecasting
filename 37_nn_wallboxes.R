@@ -1,6 +1,9 @@
-# Since this is a new topic I followed this source closely. Some parts of the code are also from this source
-# Source : Deep Learning and Scientific Computing with R torch by Sigrid Keydana (April, 2023)
+# I am following a book for using torch in R by Sigrid Keydana in order to implement a LSTM Model
+# Source: https://skeydan.github.io/Deep-Learning-and-Scientific-Computing-with-R-torch/time_series.html
+# Some parts of template code are also from this source 
 
+
+# Loading necessary Libraries
 
 library(torch)
 library(dplyr)
@@ -14,73 +17,99 @@ library(feasts)
 library(tsibbledata)
 library(zoo)
 library(Metrics)
+library(readxl)
+library(plotly)
 
 
-# Hourly
-###########################################
-wallboxes_h <- wallboxes_hourly
-wallboxes_h %>% glimpse()
 
-# Converting to tsibble which is needed to decompose the plot
-wallboxes_h_ts <- wallboxes_h %>%
-  as_tsibble(index = Time) %>%
+# Available zoom - minute, hour, day
+# Here if you set the zoom to day. The input sequence for the neural network will be 14 days and 
+# the output sequence will be the next day. As for hour it will be 14 days in hours to predict the next hour.
+
+# The reason for these zooms is that I realised by increasing the amount of data the lstm model trains on, the forecasts
+# improve considerably.
+
+ # The minute zoom is a bit of an exception. I was limited by how long it took to train the model. Hence I had to reduce the 
+# data it is trained  as well as the input sequence lenth (12 hours). This is not to be compared with the other models
+# but rather just to observe how well it forecasts. 
+
+
+
+zoom = "day"
+
+if (zoom == "minute") {
+  wallboxes <-  readxl::read_excel(path="./data/preprocessed/total_power_jan-aug_minute.xlsx")
+  wallboxes <- rename(wallboxes,total_power = total.P)
+  n_timesteps <- 60 * 12
+  
+  
+} else if (zoom == "hour") {
+  wallboxes <-  readxl::read_excel(path="./data/preprocessed/total_power_jan-aug_hour.xlsx")
+  
+  n_timesteps <- 24 * 7 * 2
+  
+  
+} else if (zoom == "day") {
+  wallboxes <-  readxl::read_excel(path="./data/preprocessed/total_power_jan-aug.xlsx")
+  wallboxes <- select(wallboxes,Date,total_power)
+  wallboxes <- data.table::as.data.table(wallboxes)
+  wallboxes$Date <- as.Date(wallboxes$Date)
+  
+  n_timesteps <- 14
+  
+
+  
+} else{
+  print("Invalid zoom")
+}
+
+
+wallboxes <- as_tsibble(wallboxes, index = Date)
+
+wallboxes <- wallboxes %>%
+  as_tsibble(index = Date) %>%
+  # Set NA to any missing time steps 
   fill_gaps()
 
+# This filter is needed for the minute zoom. Fill_gap creates NA values for every missing second.
+wallboxes <- wallboxes %>%
+  filter(second(Date) == 0)
 
-# There are missing values that I am filling with approximations as they are not many
-wallboxes_h_ts <- wallboxes_h_ts %>%
-  mutate(wallboxes = na.approx(wallboxes, na.rm = FALSE))
-
-# Decompose wallboxes_hourly_ts using STL and plot
-decompose <- wallboxes_h_ts %>%
-  model(feasts::STL(wallboxes)) %>%
-  components()
-
-decompose %>% autoplot()
-
-# Zooming in on January
-decompose_jan <- wallboxes_h_ts %>%
-  filter(year(Time) == 2022, month(Time) == 1) %>%
-  model(feasts::STL(wallboxes)) %>%
-  components()
-
-decompose_jan %>% autoplot()
+# There are not many missing time steps. Hence I am filling the missing ones with approximations
+wallboxes <- wallboxes %>%
+  mutate(total_power = na.approx(total_power, na.rm = FALSE))
 
 
 # Training
-power_train <- wallboxes_h_ts %>%
-  mutate(Year = year(Time), Month = month(Time)) %>%
+power_train <- wallboxes %>%
+  mutate(Year = year(Date), Month = month(Date), Day = day(Date)) %>%
   filter(Year == 2022 & Month >= 1 & Month <= 5) %>%
-  pull(wallboxes) %>%
+  pull(total_power) %>%
   as.matrix()
 
 
-# Validation - This will help prevent overfitting
-power_validation <- wallboxes_h_ts %>%
-  mutate(Year = year(Time), Month = month(Time)) %>%
-  filter(Year == 2022 & Month >= 6 & Month <= 7) %>%
-  pull(wallboxes) %>%
+# Validation - This will be used to implement early stoppings to reduce the time it takes to train the model
+power_validation <- wallboxes %>%
+  mutate(Year = year(Date), Month = month(Date), Day = day(Date)) %>%
+  filter((Year == 2022 & Month == 6) | (Year == 2022 & Month == 7 & Day <= 14)) %>%
+  pull(total_power) %>%
   as.matrix()
 
 # Test
-power_test <- wallboxes_h_ts %>%
-  mutate(Year = year(Time), Month = month(Time)) %>%
-  filter(Year == 2022 & Month >= 8) %>%
-  pull(wallboxes) %>%
+power_test <- wallboxes %>%
+  mutate(Year = year(Date), Month = month(Date), Day = day(Date)) %>%
+  filter(Year == 2022 & ((Month == 7 & Day > 14) | Month > 7)) %>%
+  pull(total_power) %>%
   as.matrix()
 
 length(power_train)
 length(power_validation)
 length(power_test)
 
-
-
-
 train_mean <- mean(power_train)
 train_sd <- sd(power_train)
 
-
-
+# Creating the dataset, which is needed for the model. Here I am following closely the book
 demand_dataset <- dataset(
   name = "demand_dataset",
   initialize = function(x, n_timesteps, sample_frac = 1) {
@@ -108,13 +137,9 @@ demand_dataset <- dataset(
   }
 )
 
-# We want the daily, weekly data as we saw in the decompose function. I will use 2 weeks as training input.
-n_timesteps <- 7 * 24 * 2
-
 train_ds <- demand_dataset(power_train, n_timesteps)
 valid_ds <- demand_dataset(power_validation, n_timesteps)
 test_ds <- demand_dataset(power_test, n_timesteps)
-
 dim(train_ds[1]$x)
 dim(train_ds[1]$y)
 
@@ -127,6 +152,7 @@ valid_dl <- valid_ds %>%
 test_dl <- test_ds %>%
   dataloader(batch_size = length(test_ds))
 
+
 b <- train_dl %>%
   dataloader_make_iter() %>%
   dataloader_next()
@@ -134,12 +160,14 @@ b <- train_dl %>%
 dim(b$x)
 dim(b$y)
 
+
+# By setting dropout to 0.2, I am trying to make sure that the model generalizes well on unseen data and does not overfit
 model <- nn_module(
   initialize = function(input_size,
                         hidden_size,
                         dropout = 0.2,
                         num_layers = 1,
-                        rec_dropout = 0) {
+                        rec_dropout = 0.1) {
     self$num_layers <- num_layers
     
     self$rnn <- nn_lstm(
@@ -149,27 +177,14 @@ model <- nn_module(
       dropout = rec_dropout,
       batch_first = TRUE
     )
-    # self$rnn <- nn_gru(
-    #   input_size = input_size,
-    #   hidden_size = hidden_size,
-    #   num_layers = num_layers,
-    #   dropout = dropout,
-    #   batch_first = TRUE
-    # )
+
     
     self$dropout <- nn_dropout(dropout)
     self$output <- nn_linear(hidden_size, 1)
   },
   forward = function(x) {
     (x %>%
-       # these two are equivalent
-       # (1)
-       # take output tensor,restrict to last time step
        self$rnn())[[1]][, dim(x)[2], ] %>%
-      # (2)
-      # from list of state tensors,take the first,
-      # and pick the final layer
-      # self$rnn())[[2]][[1]][self$num_layers, , ] %>%
       self$dropout() %>%
       self$output()
   }
@@ -179,8 +194,10 @@ model <- nn_module(
 input_size <- 1
 hidden_size <- 32
 num_layers <- 2
-rec_dropout <- 0.1
+rec_dropout <- 0.2
 
+
+# Creating the model
 model <- model %>%
   setup(optimizer = optim_adam, loss = nn_mse_loss()) %>%
   set_hparams(
@@ -190,90 +207,126 @@ model <- model %>%
     rec_dropout = rec_dropout
   )
 
-rates_and_losses <- model %>% 
+# This way I can use an optimal learning rate. This has a huge effect on how long it takes to train the model
+
+rates_and_losses <- model %>%
   lr_finder(train_dl, start_lr = 1e-3, end_lr = 1)
 rates_and_losses %>% plot()
 
-# With this plot I am now looking for the minimum
+# Training the neural network. Here I implement the early stopping with the validation set.
+# If the Lôss on the validation set does not improve for 4 epochs which is the patience parameter, then
+# we stop training the model
+
 
 fitted <- model %>%
   fit(train_dl, epochs = 50, valid_data = valid_dl,
       callbacks = list(
-        luz_callback_early_stopping(patience = 5),
+        luz_callback_early_stopping(patience = 4),
         luz_callback_lr_scheduler(
           lr_one_cycle,
-          max_lr = 0.05,
+          max_lr = 0.01,
           epochs = 50,
           steps_per_epoch = length(train_dl),
           call_on = "on_batch_end")
       ),
       verbose = TRUE)
 
+# Saving and Loading trained models
+
+# luz_save(fitted, "./data/day.rds")
+
+# fitted <- luz_load("./data/trained_nn_models/day.rds")
+# fitted <- luz_load("./data/trained_nn_models/hour.rds")
+# fitted <- luz_load("./data/trained_nn_models/nn_wallboxes_with_12_hour_minute.rds")
+
+
 plot(fitted)
 evaluate(fitted, test_dl)
 
+# Following the source again closely to test the model
 
-# Getting actual values from tensors 
-# 
+test <- wallboxes %>%
+  filter(year(Date) == 2022, month(Date) >= 7, !(month(Date) == 7 & day(Date) < 15))
 
-# Actual values vs Predicted Values on Test
 
-test_viz <- wallboxes_h_ts %>%
-  filter(year(Time) == 2022, month(Time) >= 7)
-
-# Converting it to matrix form
-test_viz_matrix <- test_viz %>%
+test_matrix <- test %>%
   as_tibble() %>%
-  select(wallboxes) %>%
+  select(total_power) %>%
   as.matrix()
 
-# Creating a dataset and dataloader
-viz_ds <- demand_dataset(test_viz_matrix, n_timesteps)
-viz_dl <- viz_ds %>% dataloader(batch_size = length(viz_ds))
+ds <- demand_dataset(test_matrix, n_timesteps)
+dl <- ds %>% dataloader(batch_size = length(ds))
 
-# Making predictions
-preds  <- predict(fitted, viz_dl)
+# This is where we forecast the values. This is done on a rolling basis.
+preds  <- predict(fitted, dl)
 
-# Converting the torch tensor to R array
 preds <- preds$to(device = "cpu") %>% as.matrix()
 preds <- c(rep(NA, n_timesteps), preds)
-preds
 
-pred_ts <- test_viz %>%
+
+pred_ts <- test %>%
   add_column(forecast = preds * train_sd + train_mean) %>%
-  pivot_longer(-Time) %>%
+  pivot_longer(-Date) %>%
   update_tsibble(key = name)
 
 pred_ts
+pred_ts$Date <- as.POSIXct(pred_ts$Date)
 
 
-
-
-library(plotly)
-
-pred_ts$Time <- as.POSIXct(pred_ts$Time)
-
-
-# Filter data for actual and forecast
-actual_data <- pred_ts %>% filter(name == "wallboxes")
+# Creating two variables, actual and forecasts
+actual_data <- pred_ts %>% filter(name == "total_power")
 forecast_data <- pred_ts %>% filter(name == "forecast")
 
-# # Create plotly plot
-# plot_ly() %>%
-#   add_trace(data = actual_data, x = ~Time, y = ~value, name = "actual", type = 'scatter', mode = 'lines') %>%
-#   add_trace(data = forecast_data, x = ~Time, y = ~value, name = 'predictions', mode = 'lines') %>%
-#   layout(title = 'RNN+LSTM Forecast')
+
+# Depending on zoom performing preprocessing. If the Zoom is minute or Hours I will aggregate the data into daily forecasts
 
 
-# Calculation MAPE and MAE 
+if (zoom == "day"){
+  actual_data_august <- actual_data %>% filter(month(Date) == 8)
+  forecast_data_august <- forecast_data %>% filter(month(Date) == 8)
+} else if (zoom == "hour"){
+  # Day 21 has missing hours
+  actual_data_august <- actual_data %>% filter(month(Date) == 8  & day(Date) != 21)
+  forecast_data_august <- forecast_data %>% filter(month(Date) == 8  & day(Date) != 21)
+  # Aggregating to Day
+  
+  actual_data_august <- actual_data_august %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+  
+  forecast_data_august <- forecast_data_august %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+} else if (zoom == "minute"){
+  actual_data_august <- actual_data %>% filter(month(Date) == 8  & day(Date) != 21)
+  forecast_data_august <- forecast_data %>% filter(month(Date) == 8  & day(Date) != 21)
+  
+  ## Aggregate to hour
+  actual_data_august <- actual_data_august %>%
+    group_by(Date = floor_date(Date, '1 hour')) %>%
+    summarise(value = mean(value))
+  
+  forecast_data_august <- forecast_data_august %>%
+    group_by(Date = floor_date(Date, '1 hour')) %>%
+    summarise(value = mean(value))
+  
+  ## Aggregating to day
+  
+  actual_data_august <- actual_data_august %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+  
+  forecast_data_august <- forecast_data_august %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+}
 
-# Filter data for August
-actual_data_august <- actual_data %>% filter(month(Time) == 8)
-forecast_data_august <- forecast_data %>% filter(month(Time) == 8)
+
+
 
 plot_ly() %>%
-  add_trace(data = actual_data_august, x = ~Time, y = ~value, name = "actual", type = 'scatter', mode = 'lines') %>%
-  add_trace(data = forecast_data_august, x = ~Time, y = ~value, name = 'predictions', mode = 'lines') %>%
+  add_trace(data = actual_data_august, x = ~Date, y = ~value, name = "actual", type = 'scatter', mode = 'lines') %>%
+  add_trace(data = forecast_data_august, x = ~Date, y = ~value, name = 'predictions', mode = 'lines') %>%
   layout(title = 'RNN+LSTM Forecast',
          yaxis = list(title = "kWh"),
          xaxis = list(title = "Hours")
@@ -281,391 +334,110 @@ plot_ly() %>%
          
   )
 
-# Check if they have the same length
-if (length(actual_data_august$value) == length(forecast_data_august$value)) {
-  
-  mae_value <- mae(actual_data_august$value, forecast_data_august$value)
-  print(paste0("Mean Absolute Error (MAE) for August: ", mae_value))
-  
-  mape_value <- mape(actual_data_august$value, forecast_data_august$value)
-  print(paste0("Mean Absolute Percentage Error (MAPE) for August: ", mape_value))
-  
-}
 
-# Summarizing Data to Daily to compare models
 
-actual_data_august_daily <- actual_data_august %>%
-  group_by(Time = floor_date(Time, '1 day')) %>%
-  summarise(daily_total = sum(value))
+# if (length(actual_data_august$value) == length(forecast_data_august$value)) {
+#   
+#   mae_value <- mae(actual_data_august$value, forecast_data_august$value)
+#   print(paste0("Mean Absolute Error (MAE) for August: ", mae_value))
+#   
+#   mape_value <- mape(actual_data_august$value, forecast_data_august$value)
+#   print(paste0("Mean Absolute Percentage Error (MAPE) for August: ", mape_value))
+#   
+# }
 
-forecast_data_august_daily <- forecast_data_august %>%
-  group_by(Time = floor_date(Time, '1 day')) %>%
-  summarise(daily_total = sum(value))
 
-plot_ly() %>%
-  add_trace(data = actual_data_august_daily, x = ~Time, y = ~daily_total, name = "actual", type = 'scatter', mode = 'lines') %>%
-  add_trace(data = forecast_data_august_daily, x = ~Time, y = ~daily_total, name = 'predictions', mode = 'lines') %>%
-  layout(title = 'RNN+LSTM Forecast',
-         yaxis = list(title = "kW per day"),
-         xaxis = list(title = "Days")
-         
-         
-  )
 
-if (length(actual_data_august_daily$daily_total) == length(forecast_data_august_daily$daily_total)) {
-  
-  mae_value <- mae(actual_data_august_daily$daily_total, forecast_data_august_daily$daily_total)
-  print(paste0("Mean Absolute Error (MAE) for August [Daily]: ", mae_value))
-  
-  mape_value <- mape(actual_data_august_daily$daily_total, forecast_data_august_daily$daily_total)
-  print(paste0("Mean Absolute Percentage Error (MAPE) for August [Daily]: ", mape_value))
-  
-}
+# I will also be plotting forecasts on the entire dataset
 
-# Finally I want to plot the entire January to August Data
 
-#####
+# Similar to above
+test <- wallboxes
 
-test_viz <- wallboxes_h_ts
 
-# Converting it to matrix form
-test_viz_matrix <- test_viz %>%
+test_matrix <- test %>%
   as_tibble() %>%
-  select(wallboxes) %>%
+  select(total_power) %>%
   as.matrix()
 
-# Creating a dataset and dataloader
-viz_ds <- demand_dataset(test_viz_matrix, n_timesteps)
-viz_dl <- viz_ds %>% dataloader(batch_size = length(viz_ds))
+ds <- demand_dataset(test_matrix, n_timesteps)
+dl <- ds %>% dataloader(batch_size = length(ds))
 
-# Making predictions
-preds  <- predict(fitted, viz_dl)
+# As for minute zoom, my system does not have enough memory to make the predictions
+# For the other zooms it works as expected.
+preds  <- predict(fitted, dl)
 
-# Converting the torch tensor to R array
 preds <- preds$to(device = "cpu") %>% as.matrix()
 preds <- c(rep(NA, n_timesteps), preds)
-preds
 
-pred_ts <- test_viz %>%
+
+pred_ts <- test %>%
   add_column(forecast = preds * train_sd + train_mean) %>%
-  pivot_longer(-Time) %>%
+  pivot_longer(-Date) %>%
   update_tsibble(key = name)
 
 pred_ts
-actual_data <- pred_ts %>% filter(name == "wallboxes")
-forecast_data <- pred_ts %>% filter(name == "forecast")
-
-actual_data_daily <- actual_data %>%
-  mutate(Date=as.Date(Time)) %>%
-  filter(month(Date) > 1) %>%
-  index_by(Date = floor_date(Date, '1 day')) %>%
-  summarise(daily_total = sum(value))
-
-  #summarise(daily_total = sum(value))
-
-forecast_data_daily <- forecast_data %>%
-  mutate(Date=as.Date(Time)) %>%
-  filter(month(Date) > 1) %>%
-  index_by(Date = floor_date(Date, '1 day')) %>%
-  summarise(daily_total = sum(value))
+pred_ts$Date <- as.POSIXct(pred_ts$Date)
 
 
+actual_data_total <- pred_ts %>% filter(name == "total_power")
+forecast_data_total <- pred_ts %>% filter(name == "forecast")
+
+actual_data_total <- actual_data_total %>% filter(month(Date) >= 2 )
+forecast_data_total <- forecast_data_total %>% filter(month(Date) >= 2 )
+
+
+if (zoom == "hour"){
+  actual_data_total <- actual_data_total %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+  
+  forecast_data_total <- forecast_data_total %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+} else if (zoom == "minute"){
+
+  ## Aggregate to hour
+  actual_data_total <- actual_data_total %>%
+    group_by(Date = floor_date(Date, '1 hour')) %>%
+    summarise(value = mean(value))
+  
+  forecast_data_total <- forecast_data_total %>%
+    group_by(Date = floor_date(Date, '1 hour')) %>%
+    summarise(value = mean(value))
+  
+  ## Aggregating to day
+  
+  actual_data_total <- actual_data_total %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+  
+  forecast_data_total <- forecast_data_total %>%
+    group_by(Date = floor_date(Date, '1 day')) %>%
+    summarise(value = sum(value))
+}
 
 
 plot_ly() %>%
-  add_trace(data = actual_data_daily, x = ~Date, y = ~daily_total, name = "actual", type = 'scatter', mode = 'lines') %>%
-  add_trace(data = forecast_data_daily, x = ~Date, y = ~daily_total, name = 'predictions', mode = 'lines') %>%
+  add_trace(data = actual_data_total, x = ~Date, y = ~value, name = "actual", type = 'scatter', mode = 'lines') %>%
+  add_trace(data = forecast_data_total, x = ~Date, y = ~value, name = 'predictions', mode = 'lines') %>%
   layout(title = 'RNN+LSTM Forecast',
-         yaxis = list(title = "kW per day"),
-         xaxis = list(title = "Days")
+         yaxis = list(title = "kWh"),
+         xaxis = list(title = "Hours")
          
          
   )
 
-if (length(actual_data_daily$daily_total) == length(forecast_data_daily$daily_total)) {
+
+# Calculating MAPE and MAE 
+
+if (length(actual_data_total$value) == length(forecast_data_total$value)) {
   
-  mae_value <- mae(actual_data_daily$daily_total, forecast_data_daily$daily_total)
-  print(paste0("Mean Absolute Error (MAE) for August [Daily]: ", mae_value))
+  mae_value <- mae(actual_data_total$value, forecast_data_total$value)
+  print(paste0("Mean Absolute Error (MAE): ", mae_value))
   
-  mape_value <- mape(actual_data_daily$daily_total, forecast_data_daily$daily_total)
-  print(paste0("Mean Absolute Percentage Error (MAPE) for August [Daily]: ", mape_value))
+  mape_value <- mape(actual_data_total$value, forecast_data_total$value)
+  print(paste0("Mean Absolute Percentage Error (MAPE): ", mape_value))
   
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# 
-
-
-
-# End Hourly
-##########################################
-
-
-# Initially Used Daily Total power to predict next Day 
-# With RNN this did not yield a good result
-# Then modified the code to use per minute data of a whole week to predict the next day
-# This takes too much time to run -> R suggested ETS 2 hours per iteration. I decided eventually that 
-# The hourly data () is a good balance between accuracy and computation time
-
-
-#####################################
-
-# By running only certain lines on 10_preprocessing i get the minutes data
-# wallboxes_jan <- wallboxes_jan_aug
-# wallboxes_jan <- wallboxes_jan[,c(1,10)]
-# wallboxes_jan %>% glimpse()
-# 
-# 
-# library(tidyr)
-# 
-# wallboxes_jan <- as.data.table(wallboxes_jan)
-# # 
-# wallboxes_jan %>% glimpse()
-# # 
-# # # Convert wallboxes to a tsibble
-# wallboxes_jan_ts <- wallboxes_jan %>%
-#   arrange(Date) %>%
-#   as_tsibble(index = Date) %>%
-#   fill_gaps()
-# 
-# wallboxes_jan_ts <- wallboxes_jan_ts %>%
-#   dplyr::filter(second(Date) == 0)
-# 
-# sum(is.na(wallboxes_jan_ts))
-# 
-# wallboxes_jan_ts <- wallboxes_jan_ts %>%
-#   mutate(total.P = na.approx(total.P, na.rm = FALSE))
-# 
-# 
-# sum(is.na(wallboxes_jan_ts))
-# 
-# #wallboxes_jan_ts <- na.omit(wallboxes_jan_ts)
-# 
-#   
-# # 
-# decompose_jan <- wallboxes_jan_ts %>%
-#   model(feasts::STL(total.P)) %>%
-#   components()
-# 
-# decompose_jan %>% autoplot()
-# 
-# 
-# 
-# power_train <- wallboxes_jan_ts %>%
-#   mutate(Year = year(Date), Week = week(Date), Month = month(Date)) %>%
-#   filter(Year == 2022 & Month == 1) %>%
-#   pull(total.P) %>%
-#   as.matrix()
-# 
-# # Validation set (Third week of January 2022)
-# power_validation <- wallboxes_jan_ts %>%
-#   mutate(Year = year(Date), Week = week(Date), Month = month(Date)) %>%
-#   filter(Year == 2022 & Month == 2) %>%
-#   pull(total.P) %>%
-#   as.matrix()
-# 
-# # Test set (Last week of January 2022)
-# power_test <- wallboxes_jan_ts %>%
-#   mutate(Year = year(Date), Week = week(Date), Month = month(Date)) %>%
-#   filter(Year == 2022 & Month == 3) %>%
-#   pull(total.P) %>%
-#   as.matrix()
-# # 
-# length(power_train)
-# length(power_validation)
-# length(power_test)
-# # 
-# train_mean <- mean(power_train)
-# train_sd <- sd(power_train)
-# # 
-# demand_dataset <- dataset(
-#   name = "demand_dataset",
-#   initialize = function(x,
-#                         n_timesteps,
-#                         n_forecast,
-#                         sample_frac = 1) {
-#     self$n_timesteps <- n_timesteps
-#     self$n_forecast <- n_forecast
-#     self$x <- torch_tensor((x - train_mean) / train_sd)
-#     
-#     n <- length(self$x) -
-#       self$n_timesteps - self$n_forecast + 1
-#     
-#     self$starts <- sort(sample.int(
-#       n = n,
-#       size = n * sample_frac
-#     ))
-#   },
-#   .getitem = function(i) {
-#     start <- self$starts[i]
-#     end <- start + self$n_timesteps - 1
-#     
-#     list(
-#       x = self$x[start:end],
-#       y = self$x[(end + 1):(end + self$n_forecast)]$
-#         squeeze(2)
-#     )
-#   },
-#   .length = function() {
-#     length(self$starts)
-#   }
-# )
-# n_timesteps <- 60 * 24 * 7
-# n_forecast <- 60 * 24 * 7
-# 
-# train_ds <- demand_dataset(
-#   power_train,
-#   n_timesteps,
-#   n_forecast,
-#   sample_frac = 1
-# )
-# valid_ds <- demand_dataset(
-#   power_validation,
-#   n_timesteps,
-#   n_forecast,
-#   sample_frac = 1
-# )
-# test_ds <- demand_dataset(
-#   power_test,
-#   n_timesteps,
-#   n_forecast
-# )
-# 
-# 
-# # train_ds <- demand_dataset(power_train, n_timesteps)
-# # length(power_validation)
-# # n_timesteps
-# # valid_ds <- demand_dataset(power_validation, n_timesteps)
-# # test_ds <- demand_dataset(power_test, n_timesteps)
-# 
-# n_train <- length(power_train) - n_timesteps
-# n_valid <- length(power_validation) - n_timesteps
-# n_test <- length(power_test) - n_timesteps
-# 
-# print(paste("n_train:", n_train))
-# print(paste("n_valid:", n_valid))
-# print(paste("n_test:", n_test))
-# 
-# 
-# dim(train_ds[1]$x)
-# dim(train_ds[1]$y)
-# 
-# batch_size <- 128
-# 
-# train_dl <- train_ds %>%
-#   dataloader(batch_size = batch_size, shuffle = TRUE)
-# valid_dl <- valid_ds %>%
-#   dataloader(batch_size = batch_size)
-# test_dl <- test_ds %>%
-#   dataloader(batch_size = length(test_ds))
-# 
-# b <- train_dl %>%
-#   dataloader_make_iter() %>%
-#   dataloader_next()
-# 
-# dim(b$x)
-# dim(b$y)
-# 
-# model <- nn_module(
-#   initialize = function(input_size,
-#                         hidden_size,
-#                         linear_size,
-#                         output_size,
-#                         dropout = 0.2,
-#                         num_layers = 1,
-#                         rec_dropout = 0) {
-#     self$num_layers <- num_layers
-#     
-#     self$rnn <- nn_lstm(
-#       input_size = input_size,
-#       hidden_size = hidden_size,
-#       num_layers = num_layers,
-#       dropout = rec_dropout,
-#       batch_first = TRUE
-#     )
-#     
-#     self$dropout <- nn_dropout(dropout)
-#     self$mlp <- nn_sequential(
-#       nn_linear(hidden_size, linear_size),
-#       nn_relu(),
-#       nn_dropout(dropout),
-#       nn_linear(linear_size, output_size)
-#     )
-#   },
-#   forward = function(x) {
-#     x <- self$rnn(x)[[2]][[1]][self$num_layers, , ] %>%
-#       self$mlp()
-#   }
-# )
-# 
-# 
-# input_size <- 1
-# hidden_size <- 32
-# linear_size <- 512
-# dropout <- 0.5
-# num_layers <- 2
-# rec_dropout <- 0.2
-# 
-# model <- model %>%
-#   setup(optimizer = optim_adam, loss = nn_mse_loss()) %>%
-#   set_hparams(
-#     input_size = input_size,
-#     hidden_size = hidden_size,
-#     linear_size = linear_size,
-#     output_size = n_forecast,
-#     num_layers = num_layers,
-#     rec_dropout = rec_dropout
-#   )
-# 
-# rates_and_losses <- model %>% lr_finder(
-#   train_dl,
-#   start_lr = 1e-4,
-#   end_lr = 0.5
-# )
-# rates_and_losses %>% plot()
-# 
-# fitted <- model %>%
-#   fit(train_dl, epochs = 100, valid_data = valid_dl,
-#       callbacks = list(
-#         luz_callback_early_stopping(patience = 3),
-#         luz_callback_lr_scheduler(
-#           lr_one_cycle,
-#           max_lr = 0.01,
-#           epochs = 100,
-#           steps_per_epoch = length(train_dl),
-#           call_on = "on_batch_end")
-#       ),
-#       verbose = TRUE)
-# 
-# plot(fitted)
-# evaluate(fitted, test_dl)
-# 
-# 
-# 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
