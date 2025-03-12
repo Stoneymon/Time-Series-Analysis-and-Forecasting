@@ -1,1 +1,1 @@
-This project was part of a Data Science Capstone Project. The goal of this project was to predict the hourly demand of EV charging points to maximize the electricity used from soloar panels / minimize the electricity needed from the power grid.
+This project was part of a Data Science Capstone Project. The goal of this project was to predict the hourly demand of EV charging points to maximize the electricity used from solar panels / minimize the electricity needed from the power grid.
